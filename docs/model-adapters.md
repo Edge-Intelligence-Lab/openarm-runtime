@@ -207,6 +207,21 @@ be learned explicitly. A new prediction still uses current images and measured
 TCP state during a hold. Shorter receding-horizon chunks and training with the
 same bounds are separate development experiments, not changes to frozen results.
 
+An explicitly versioned state10 checkpoint may now opt in with
+`models.tacpilot:UprightObservation` argument `execution: true`. It requires the
+`execution/left` stream and appends `[waiting, maximum_joint_error_rad/0.15]` to
+the unchanged state8. It rejects nonbinary waiting, nonfinite feedback and errors
+outside [0,0.15] rad. The ACT loader requires an exact matching
+`execution-adapter.json` contract and ten-column state normalizer/projections;
+composition rejects encoder/model width mismatch before hardware startup. Default
+encoders/checkpoints remain state8. State10 does not supply object truth.
+
+The source expansion tool preserves all old weights and appends zero columns to
+both state projections. An expanded-but-untrained parent initially ignores the
+extra features. Real LeRobot runtime/source backend parity was exact for three
+execution-feedback inputs, but this is not evidence of learned waiting or task
+success. Fine-tuning and independent development evaluation remain required.
+
 ## Fixed preparation and automatic handoff
 
 The upright example uses 3-degree joint arrival at the intermediate swing/elbow

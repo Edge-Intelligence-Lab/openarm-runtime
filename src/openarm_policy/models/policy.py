@@ -40,6 +40,15 @@ class ModelPolicy:
                 obj = component(spec)
                 self.components.append(obj)
                 obj.reset(context)
+            model, encoder, _ = self.components
+            model_meta = getattr(model, 'metadata', {})
+            model_meta = model_meta.get('model', model_meta)
+            width = model_meta.get('state_width')
+            encoded_width = getattr(encoder, 'metadata', {}).get('state_width')
+            if encoded_width == 10 and width is None:
+                raise ValueError('Execution-aware encoder requires a checkpoint publishing its state width')
+            if width is not None and encoded_width is not None and width != encoded_width:
+                raise ValueError('Checkpoint and observation encoder state widths differ')
         except BaseException:
             self.close()
             raise

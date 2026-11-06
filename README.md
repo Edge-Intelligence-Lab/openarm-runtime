@@ -46,6 +46,8 @@ For reusable checkpoint/input/output plugins and the initial pure-visual ACT
 upright integration, see [model adapters and deployment](docs/model-adapters.md).
 Cartesian policy execution is an explicit geometry-declared capability, not joint-vector
 relabeling; trained-policy hardware acceptance remains separate.
+Offline [head/wrist hand-eye calibration](docs/camera-calibration.md) fits measured,
+synchronized board/FK observations without opening devices or installing estimates.
 An optional fixed preparation can connect from actual feedback, move to task-ready,
 open the gripper and hand off to the model in the same operator-started episode.
 Shared bilateral gravity configuration and per-arm feedforward apply beneath all

@@ -17,16 +17,19 @@ def latest(observation, name):
 
 
 class UprightObservation:
-    def __init__(self, overview, wrist, side="left", size=256, crops=None):
+    def __init__(self, overview, wrist, side="left", size=256, crops=None, execution=False):
         if side not in ("left", "right") or type(size) is not int or size < 1:
             raise ValueError("Invalid side or image size")
         if overview == wrist:
             raise ValueError("Two distinct camera streams required")
         self.overview, self.wrist, self.side = overview, wrist, side
         self.size, self.crops = size, dict(crops or {})
+        if type(execution) is not bool:raise ValueError('execution must be boolean')
+        self.execution = execution
         if set(self.crops) - {overview, wrist}:
             raise ValueError("Crop names must match selected camera streams")
         self.metadata = dict(overview=overview, wrist=wrist, side=side, size=size,
+                             state_width=10 if execution else 8,
                              crops=self.crops, image_transform="BGR_to_RGB_area_resize")
 
     def reset(self, context):
@@ -37,6 +40,10 @@ class UprightObservation:
         tcp = specs.get(f"tcp/{self.side}")
         if tcp is None or tcp.shape != (8,) or not tcp.required:
             raise ValueError("Required calibrated measured TCP/opening stream missing")
+        if self.execution:
+            status = specs.get(f'execution/{self.side}')
+            if status is None or status.shape != (2,) or not status.required:
+                raise ValueError('Execution-aware checkpoint requires measured execution feedback stream')
 
     def image(self, observation, name):
         import cv2
@@ -63,6 +70,12 @@ class UprightObservation:
                 or not np.isclose(np.linalg.norm(tcp[3:7]), 1., atol=1e-6)):
             raise ValueError("Invalid measured task-frame TCP/opening")
         state = np.r_[tcp[:3], Rotation.from_quat(tcp[3:7]).as_rotvec(), [tcp[7]/2]*2]
+        if self.execution:
+            feedback = np.asarray(latest(observation, f'execution/{self.side}'), dtype=float)
+            if (feedback.shape != (2,) or not np.isfinite(feedback).all()
+                    or feedback[0] not in (0, 1) or not 0 <= feedback[1] <= .15):
+                raise ValueError('Invalid measured execution feedback')
+            state = np.r_[state, feedback[0], feedback[1]/.15]
         return {"state": state.astype(np.float32)[None],
                 "image": self.image(observation, self.overview),
                 "wrist": self.image(observation, self.wrist)}

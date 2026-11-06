@@ -64,6 +64,9 @@ def main():
     snapshot_command = commands.add_parser("snapshot", help="Read-only disabled-arm feedback; never enable or move")
     snapshot_command.add_argument("--side", choices=("left", "right"), default="left")
     snapshot_command.add_argument("--output", type=Path, help="New JSON file outside Git")
+    camera_calibrate = commands.add_parser("camera-calibrate", help="Offline measured-board hand-eye fit; never opens devices")
+    camera_calibrate.add_argument("--observations", type=Path, required=True)
+    camera_calibrate.add_argument("--output", type=Path, required=True, help="New calibration estimate JSON; never installed automatically")
     gravity = commands.add_parser("gravity", help="Offline gravity prediction; never opens hardware")
     gravity.add_argument("--profile", type=Path, required=True)
     gravity_input = gravity.add_mutually_exclusive_group(required=True)
@@ -77,6 +80,10 @@ def main():
     from openarm_collection.cli import configure as configure_collection
     configure_collection(commands.add_parser("collection", help="Inspect, review and export demonstration episodes"))
     args = parser.parse_args()
+    if args.command == "camera-calibrate":
+        from .camera_calibration import run
+        run(args)
+        return
     if args.command == "snapshot":
         if args.config is None:
             parser.error("snapshot requires --config")

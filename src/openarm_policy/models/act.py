@@ -30,7 +30,15 @@ class TacPilotACT:
         if self.expected_hash is not None and digest != self.expected_hash:
             raise ValueError("ACT model SHA256 mismatch")
         cfg = ACTConfig.from_pretrained(root, local_files_only=True)
-        if (cfg.chunk_size != 100 or cfg.robot_state_feature.shape != (8,)
+        execution = root/'execution-adapter.json'
+        self.execution_adapter = json.loads(execution.read_text()) if execution.exists() else None
+        self.state_width = 8
+        if self.execution_adapter is not None:
+            expected = {'schema': 'tacpilot.execution-state.v1', 'base_state_width': 8, 'state_width': 10,
+                        'features': ['waiting', 'joint_tracking_error_fraction'], 'tracking_scale_rad': .15}
+            if self.execution_adapter != expected:raise ValueError('Unsupported execution-state adapter')
+            self.state_width = 10
+        if (cfg.chunk_size != 100 or cfg.robot_state_feature.shape != (self.state_width,)
                 or cfg.action_feature.shape != (7,) or set(cfg.image_features) != {
                     "observation.images.image", "observation.images.image2"}):
             raise ValueError("Unsupported ACT checkpoint: expected audited state8/action7/H100/two-camera format")
@@ -41,7 +49,7 @@ class TacPilotACT:
         self.stats = {k: v.to(self.device) for k, v in load_file(str(
             root / "policy_preprocessor_step_3_normalizer_processor.safetensors")).items()}
         post = load_file(str(root / "policy_postprocessor_step_0_unnormalizer_processor.safetensors"))
-        for key, width in (("observation.state", 8), ("action", 7),
+        for key, width in (("observation.state", self.state_width), ("action", 7),
                            ("observation.images.image", None), ("observation.images.image2", None)):
             for field in ("mean", "std"):
                 value = self.stats[key + "." + field]
@@ -55,8 +63,9 @@ class TacPilotACT:
         self.adapter = json.loads(adapter.read_text()) if adapter.exists() else None
         if self.adapter is not None:
             # Validate checkpoint-bound constants before any robot startup.
-            self.relative_state([[0.] * 8])
+            self.relative_state([[0.] * self.state_width])
         self.metadata = {"family": "tacpilot_act", "model_sha256": digest, "device": self.device,
+                         "state_width": self.state_width, "execution_adapter": self.execution_adapter,
                          "files_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                           for p in root.iterdir() if p.suffix in (".json", ".safetensors")
                                           and p.name != "model.safetensors"}}
@@ -97,8 +106,11 @@ class TacPilotACT:
         if self.policy is None:
             raise RuntimeError("ACT backend must be reset before prediction")
         state = np.asarray(inputs["state"])
-        if state.shape != (1, 8) or not np.isfinite(state).all():
+        if state.shape != (1, self.state_width) or not np.isfinite(state).all():
             raise ValueError("Expected one finite state8 batch")
+        if self.state_width == 10 and (((state[:, 8:] < 0) | (state[:, 8:] > 1)).any()
+                                       or not np.isin(state[:, 8], [0, 1]).all()):
+            raise ValueError('Invalid execution feedback features')
         batch = {"observation.state": torch.as_tensor(self.relative_state(state), device=self.device).float()}
         for source, key in (("image", "observation.images.image"), ("wrist", "observation.images.image2")):
             image = np.asarray(inputs[source])

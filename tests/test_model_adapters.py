@@ -84,6 +84,15 @@ class CompositionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ModelPolicy({}, {}, {}, period_s=.1).reset(Context(tcp_spec(), (), 20))
 
+    def test_execution_state_width_mismatch_rejects_before_hardware_start(self):
+        model = Mock(metadata={'state_width': 8})
+        encoder = Mock(metadata={'state_width': 10})
+        policy = ModelPolicy({}, {}, {})
+        with patch('openarm_policy.models.policy.component', side_effect=[model, encoder, Mock()]):
+            with self.assertRaises(ValueError):policy.reset(Context(tcp_spec(), (), 20))
+        model.close.assert_called_once()
+        encoder.close.assert_called_once()
+
     def test_tcp_schema_is_not_joint_schema(self):
         spec = tcp_spec()
         obs = Observation(1, 10, {})
@@ -122,6 +131,21 @@ class UprightTests(unittest.TestCase):
         self.assertEqual(inputs["image"].shape, (1, 256, 256, 3))
         self.np.testing.assert_array_equal(inputs["image"][0, 0, 0], [30, 20, 10])
         self.np.testing.assert_allclose(inputs["state"], [[0, 0, .5, 0, 0, 0, .03, .03]])
+
+    def test_execution_encoder_requires_live_feedback_and_explicit_state10_opt_in(self):
+        from openarm_policy.models.tacpilot import UprightObservation
+        encoder = UprightObservation('camera/overview', 'camera/wrist', execution=True)
+        with self.assertRaises(ValueError):encoder.reset(self.context)
+        context = replace(self.context, streams=self.context.streams+(
+            StreamSpec('execution/left', 'waiting_joint_error', (2,), 'bool,rad', 'motor'),))
+        encoder.reset(context)
+        streams = dict(self.obs.streams)
+        streams['execution/left'] = (SensorSample(1, 9.9, [1., .075]),)
+        result = encoder.encode(replace(self.obs, streams=streams))
+        self.assertEqual(result['state'].shape, (1, 10))
+        self.np.testing.assert_allclose(result['state'][0, 8:], [1., .5])
+        streams['execution/left'] = (SensorSample(1, 9.9, [1., .3]),)
+        with self.assertRaises(ValueError):encoder.encode(replace(self.obs, streams=streams))
 
     def test_missing_optional_camera_bad_dtype_crop_and_future_fail(self):
         from openarm_policy.models.tacpilot import UprightObservation
