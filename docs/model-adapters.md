@@ -396,3 +396,25 @@ Core composition tests run without ML or hardware dependencies; numerical tests
 skip explicitly when their optional libraries are absent. A real-checkpoint
 parity check should compare the full H100 prediction against the historical
 TacPilot loader on identical state/RGB batches, not just test random weights.
+## Optional causal temporal aggregation
+
+`openarm_policy.models.temporal:TemporalEnsembleActions` wraps an existing action
+decoder spec, for example `TemporalEnsembleActions(action=existing_action_spec,
+coefficient=.01, rotation_average="linear")`. It is opt-in and owns history for
+one policy episode, not a shared inference server. The checkpoint, encoder and
+underlying execution protections are unchanged; absolute decoders still require
+their exact contract fingerprint and actual matched execution governor.
+
+Chunks are aligned by the observation's control-clock time. Only received,
+unexpired predictions overlap; zero rows are valid holds. Weights are proportional
+to `exp(coefficient * age_steps)`, conventionally preferring older plans slightly.
+For fixed-home absolute goal7 choose `rotation_average="rotvec_pi"`: normalized
+predictions are clipped before SO(3) rotation averaging, avoiding cancellation at
+the pi branch. Delta actions use `"linear"`. This algorithm can change behavior
+and needs its own actual evaluation; it is not enabled by default or a success claim.
+
+The standalone `TemporalActionEnsembler` numerical helper supports the same causal
+alignment without robot access. Public exports are lazy so a legacy simulator can
+import that helper from a pinned checkout without loading execution contracts.
+The full runtime's supported Python version is unchanged. Helper/algorithm versions
+must be recorded alongside the checkpoint and execution configuration.

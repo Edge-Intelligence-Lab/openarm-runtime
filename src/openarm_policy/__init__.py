@@ -1,13 +1,30 @@
-"""Model-independent policy contracts and execution; all imports are passive."""
-from .contracts import ActionChunk, ActionSpec, Context, Observation, Policy, SensorSample, StreamSpec
-from .observations import ObservationBuffer, TactileObservation, VideoObservation, HTTPVideoObservation
-from .robots import ClassicRobot, SimulatedRobot
-from .session import PolicySession, SessionConfig
-from .adapters import ChunkPolicyAdapter, ImportedPolicy
-from .recording import EpisodeRecorder, replay_observations
-from .preparation import FixedJointPreparation
+"""Passive, lazy public exports; numerical plugins need not load robot contracts."""
 
 __all__ = ["ActionChunk", "ActionSpec", "Context", "Observation", "Policy", "SensorSample", "StreamSpec",
             "ObservationBuffer", "TactileObservation", "VideoObservation", "HTTPVideoObservation", "ClassicRobot", "SimulatedRobot",
            "PolicySession", "SessionConfig", "ChunkPolicyAdapter", "ImportedPolicy", "EpisodeRecorder",
-            "replay_observations", "FixedJointPreparation"]
+             "replay_observations", "FixedJointPreparation"]
+
+_MODULES = {
+    'contracts': ('ActionChunk','ActionSpec','Context','Observation','Policy','SensorSample','StreamSpec'),
+    'observations': ('ObservationBuffer','TactileObservation','VideoObservation','HTTPVideoObservation'),
+    'robots': ('ClassicRobot','SimulatedRobot'),
+    'session': ('PolicySession','SessionConfig'),
+    'adapters': ('ChunkPolicyAdapter','ImportedPolicy'),
+    'recording': ('EpisodeRecorder','replay_observations'),
+    'preparation': ('FixedJointPreparation',),
+}
+
+
+def __getattr__(name):
+    from importlib import import_module
+    for module,names in _MODULES.items():
+        if name in names:
+            value = getattr(import_module('.'+module,__name__),name)
+            globals()[name] = value
+            return value
+    raise AttributeError('module %r has no attribute %r' % (__name__,name))
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))
