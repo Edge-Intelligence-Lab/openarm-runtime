@@ -21,6 +21,7 @@ Changelog = "https://github.com/Edge-Intelligence-Lab/openarm-runtime/blob/main/
 
 [project.optional-dependencies]
 gravity = ["pin==4.1.0"]
+cartesian = ["pin==4.1.0", "pin-pink==4.4.0", "daqp==0.11.0"]
 platform = ["nicegui==3.18.0", "aiohttp==3.14.5"]
 leader = ["feetech-servo-sdk==1.0.0", "pyserial==3.5"]
 viewer = ["viser[urdf]==1.1.1", "pycollada==0.9.3"]
