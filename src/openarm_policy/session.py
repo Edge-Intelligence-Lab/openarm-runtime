@@ -117,7 +117,8 @@ class PolicySession:
             submit(step.values, deadline)
             self._record("preparation_command", phase="preparation", values=step.values,
                          names=self.preparation.spec.names, kind=self.preparation.spec.kind,
-                         waypoint=step.waypoint, progress=step.progress, valid_until=deadline)
+                         waypoint=step.waypoint, progress=step.progress, valid_until=deadline,
+                         arrival=step.arrival)
             if step.waypoint != last_waypoint:
                 self._record("preparation_waypoint", phase="preparation", waypoint=step.waypoint)
                 last_waypoint = step.waypoint

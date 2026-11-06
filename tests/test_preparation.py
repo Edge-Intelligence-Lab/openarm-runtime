@@ -89,8 +89,9 @@ class PreparationTests(unittest.TestCase):
         options.pop("kind")
         options["waypoints"] = options["waypoints"][:1]
         options["start_reference_rad"] = None
-        self.assertAlmostEqual(options["settle_tolerance_rad"], math.radians(2))
-        for error_deg, accepted in ((1.2, True), (4.8, False)):
+        self.assertAlmostEqual(options["settle_tolerance_rad"], math.radians(3))
+        self.assertEqual(options["settle_timeout_s"], 20)
+        for error_deg, accepted in ((2.28, True), (4.8, False)):
             stage = FixedJointPreparation(**options)
             self.bind(stage)
             actual = list(options["waypoints"][0]["joints_rad"]) + [.01]
@@ -106,7 +107,7 @@ class PreparationTests(unittest.TestCase):
                     self.fail("Acceptable preparation bias never settled")
             else:
                 with self.assertRaises(TimeoutError):
-                    for frame in range(300):
+                    for frame in range(500):
                         self.assertFalse(stage.step(observation(actual, 10+frame*.05)).completed)
 
     def test_stale_tracking_far_start_and_timeouts_reject(self):
@@ -118,6 +119,49 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): stage.step(stale)
         with self.assertRaises(RuntimeError): stage.step(observation((.2, 0, 0, 0, 0, 0, 0, 0), 10.05))
         with self.assertRaises(TimeoutError): stage.step(observation((0.,)*8, 131))
+
+    def tcp_stage(self, error, *, grip=0.):
+        stage = recipe(waypoints=[dict(name="ready", joints_rad=[.07, 0, 0, .02, 0, 0, 0],
+                                       gripper_rad=grip, tcp_tolerance=dict(
+                                           position_m=.02, orientation_rad=math.radians(10), gripper_rad=.05))],
+                       settle_tolerance_rad=.01, settle_samples=5, settle_timeout_s=20.)
+        robot = SimulatedRobot(("left",))
+        robot.preparation_pose_error = error
+        stage.bind(robot, Context(robot.spec, robot.streams, 20))
+        stage.begin(observation((0.,)*8))
+        return stage
+
+    def test_tcp_arrival_not_per_joint_precision_and_waits_longer_than_eight_seconds(self):
+        error = Mock(return_value=(.03, 0.))
+        stage = self.tcp_stage(error)
+        for frame in range(500):
+            if frame == 220:  # feedback reaches the task region after 11 seconds
+                error.return_value = (.01, math.radians(5))
+            step = stage.step(observation((0.,)*8, 10+frame*.05))
+            if step.completed:
+                self.assertGreaterEqual(frame, 224)
+                self.assertEqual(stage.stable, 5)
+                self.assertEqual(step.arrival["kind"], "tcp_fk")
+                break
+        else:
+            self.fail("FK arrival failed despite acceptable TCP pose")
+
+    def test_tcp_position_orientation_and_gripper_must_all_arrive(self):
+        for error, grip in (((.021, 0.), 0.), ((0., math.radians(11)), 0.), ((0., 0.), .06)):
+            stage = self.tcp_stage(Mock(return_value=error), grip=grip)
+            with self.assertRaises(TimeoutError):
+                for frame in range(500):
+                    self.assertFalse(stage.step(observation((0.,)*8, 10+frame*.05)).completed)
+
+    def test_tcp_missing_capability_and_invalid_error_reject(self):
+        stage = self.tcp_stage(Mock(return_value=(float("nan"), 0.)))
+        with self.assertRaises(RuntimeError):
+            for frame in range(100):
+                stage.step(observation((0.,)*8, 10+frame*.05))
+        stage = recipe(waypoints=[dict(name="ready", joints_rad=[0]*7, tcp_tolerance=dict(
+                                      position_m=.02, orientation_rad=.1, gripper_rad=.05))])
+        with self.assertRaises(ValueError):
+            self.bind(stage)
 
     def test_invalid_configuration_or_capability_fails_before_start(self):
         for change in (dict(velocity_rad_s=1), dict(settle_samples=0), dict(acceleration_rad_s2=math.nan),

@@ -183,12 +183,27 @@ by model-load or offline regressions.
 
 ## Fixed preparation and automatic handoff
 
-The upright example uses a 2-degree (0.0349066 rad) joint arrival tolerance for
-five consecutive samples, rather than a sub-degree precision requirement. This
-is a task-start acceptance region for low-cost hardware, not a calibrated
-accuracy claim. Arrival tolerance is separate from tracking-abort limits, speed,
-joint bounds and feedback freshness; those protections remain unchanged. Other
-tasks can supply their own tolerance without changing the generic sequencer.
+The upright example uses 3-degree joint arrival at the intermediate swing/elbow
+waypoints. Task-ready and open-gripper waypoints instead declare `tcp_tolerance`:
+`position_m: 0.02`, `orientation_rad: 0.174533` (10 degrees), and `gripper_rad:
+0.05236` (3 degrees of motor angle). All three conditions must hold for five
+consecutive samples; individual arm joints need not meet the arrival tolerance.
+Each motion segment allows 20 seconds of settling after its trajectory finishes.
+The total preparation still has a 120-second bound.
+
+The robot's explicit `preparation_pose_error(actual, goal)` FK capability compares
+measured feedback against the waypoint goal, not the last dispatched pose against
+itself. No hardware access is needed for this calculation; missing FK capability
+rejects TCP arrival configuration before enable. Rotation and gripper checks remain
+necessary: matching xyz alone does not establish a usable grasp-start pose. Records
+include position/orientation/gripper arrival errors. With nominal geometry these
+are model estimates, not external measurements or a calibrated accuracy claim.
+
+Arrival is separate from per-joint tracking-abort limits, speed, physical joint
+bounds and freshness; those protections and the posture-based startup-region
+check remain unchanged. Intermediate joint waypoints preserve the intended
+preparation posture, not obstacle avoidance. Other tasks may configure their own
+arrival regions without changing the generic sequencer.
 
 The optional inline `preparation` object or a `preparation_profile` JSON path
 (relative to the policy profile) selects `kind: "fixed_joint_waypoints_v1"`.

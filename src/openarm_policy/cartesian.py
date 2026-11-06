@@ -102,6 +102,15 @@ class CartesianRobot:
             raise RuntimeError("Cartesian preparation requires a started, idle robot")
         self.preparing = True
 
+    def preparation_pose_error(self, actual, goal):
+        """Model FK distance/rotation from supplied measured joints, no CAN reads."""
+        import numpy as np
+        from scipy.spatial.transform import Rotation
+        measured = self.task_from_base @ self.chain.forward(actual[:7])
+        target = self.task_from_base @ self.chain.forward(goal[:7])
+        return (float(np.linalg.norm(measured[:3, 3]-target[:3, 3])),
+                float(Rotation.from_matrix(target[:3, :3].T @ measured[:3, :3]).magnitude()))
+
     def submit_preparation(self, values, valid_until):
         """Typed joint setup through the same underlying worker/lease, not TCP IK."""
         import numpy as np

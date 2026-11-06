@@ -7,19 +7,21 @@
   "acceleration_rad_s2": 0.75,
   "gripper_velocity_rad_s": 0.5,
   "gripper_acceleration_rad_s2": 1.0,
-  "settle_tolerance_rad": 0.03490658503988659,
+  "settle_tolerance_rad": 0.05235987755982989,
   "settle_samples": 5,
-  "settle_timeout_s": 8.0,
+  "settle_timeout_s": 20.0,
   "maximum_duration_s": 120.0,
   "waypoints": [
     {"name": "swing_out", "joints_rad": [0, -1.2, 0, 0.03, 0, 0, 0]},
     {"name": "raise_elbow", "joints_rad": [0, -1.2, 0, 1.6, 0, 0, 0]},
     {
       "name": "task_ready",
+      "tcp_tolerance": {"position_m": 0.02, "orientation_rad": 0.17453292519943295, "gripper_rad": 0.05235987755982989},
       "joints_rad": [-0.32495068204051336, -0.6407514128904848, 0.6522804993492397, 1.4264994768656423, 0.7665447122040642, -0.4067009065584856, -1.3529924253826466]
     },
     {
       "name": "open_gripper",
+      "tcp_tolerance": {"position_m": 0.02, "orientation_rad": 0.17453292519943295, "gripper_rad": 0.05235987755982989},
       "joints_rad": [-0.32495068204051336, -0.6407514128904848, 0.6522804993492397, 1.4264994768656423, 0.7665447122040642, -0.4067009065584856, -1.3529924253826466],
       "gripper_rad": 0.7854
     }

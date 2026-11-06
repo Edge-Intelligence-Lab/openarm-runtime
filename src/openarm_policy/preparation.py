@@ -23,6 +23,7 @@ class PreparationStep:
     waypoint: str
     progress: float
     completed: bool
+    arrival: dict | None = None
 
 
 class FixedJointPreparation:
@@ -47,14 +48,23 @@ class FixedJointPreparation:
         self.side = side
         self.waypoints = []
         for item in waypoints:
-            if (not isinstance(item, dict) or set(item) - {"name", "joints_rad", "gripper_rad"}
+            if (not isinstance(item, dict) or set(item) - {"name", "joints_rad", "gripper_rad", "tcp_tolerance"}
                     or not isinstance(item.get("name"), str) or not item["name"].strip()):
                 raise ValueError("Waypoint needs a name, joints_rad and optional gripper_rad")
             goal = vector(item["joints_rad"], 7, "waypoint joints")
             grip = item.get("gripper_rad")
             if grip is not None and not finite(grip):
                 raise ValueError("gripper_rad must be finite or omitted to hold its previous goal")
-            self.waypoints.append(dict(name=item["name"], joints_rad=goal, gripper_rad=grip))
+            tcp = item.get("tcp_tolerance")
+            if tcp is not None:
+                if not isinstance(tcp, dict) or set(tcp) != {"position_m", "orientation_rad", "gripper_rad"}:
+                    raise ValueError("TCP arrival needs position_m, orientation_rad and gripper_rad tolerances")
+                for name, upper in (("position_m", .05), ("orientation_rad", .5), ("gripper_rad", .15)):
+                    if not finite(tcp[name]) or not 0 < tcp[name] <= upper:
+                        raise ValueError(f"Invalid TCP arrival {name}")
+                tcp = dict(tcp)
+            self.waypoints.append(dict(name=item["name"], joints_rad=goal, gripper_rad=grip,
+                                       tcp_tolerance=tcp))
         if len({w["name"] for w in self.waypoints}) != len(self.waypoints):
             raise ValueError("Preparation waypoint names must be unique")
         self.speed = (float(velocity_rad_s),)*7 + (float(gripper_velocity_rad_s),)
@@ -77,6 +87,9 @@ class FixedJointPreparation:
     def bind(self, robot, context):
         expected = tuple(f"{self.side}.joint{i}" for i in range(1, 8)) + (f"{self.side}.gripper_motor",)
         self.spec = getattr(robot, "preparation_spec", robot.spec)
+        self.pose_error = getattr(robot, "preparation_pose_error", None)
+        if any(w["tcp_tolerance"] is not None for w in self.waypoints) and not callable(self.pose_error):
+            raise ValueError("TCP arrival requires an explicit robot FK capability")
         if self.spec.kind != POSITION or self.spec.names != expected:
             raise ValueError("Preparation needs an explicit single-arm joint-position capability")
         if (hasattr(robot, "speed") and any(v > robot.speed for v in self.speed[:7])) or (
@@ -166,10 +179,26 @@ class FixedJointPreparation:
         waypoint = self.waypoints[self.index]["name"]
         progress = (self.index + u)/len(self.waypoints)
         completed = False
+        arrival = None
         if self.frame >= self.ticks:
             if self.settling_at is None:
                 self.settling_at = now
-            self.stable = self.stable+1 if max(abs(a-b) for a, b in zip(actual, self.goal)) <= self.tolerance else 0
+            tcp = self.waypoints[self.index]["tcp_tolerance"]
+            if tcp is None:
+                error = max(abs(a-b) for a, b in zip(actual, self.goal))
+                arrived = error <= self.tolerance
+                arrival = dict(kind="joint", max_error_rad=error)
+            else:
+                position, orientation = self.pose_error(actual, self.goal)
+                if any(not finite(v) or v < 0 for v in (position, orientation)):
+                    raise RuntimeError("Invalid preparation FK arrival error")
+                gripper = abs(actual[7]-self.goal[7])
+                arrived = (position <= tcp["position_m"] and orientation <= tcp["orientation_rad"]
+                           and gripper <= tcp["gripper_rad"])
+                arrival = dict(kind="tcp_fk", position_error_m=position,
+                               orientation_error_rad=orientation, gripper_error_rad=gripper)
+            arrival["accepted"] = arrived
+            self.stable = self.stable+1 if arrived else 0
             if self.stable >= self.stable_count:
                 if self.index == len(self.waypoints)-1:
                     completed, progress = True, 1.
@@ -182,4 +211,4 @@ class FixedJointPreparation:
                 raise TimeoutError(f"Preparation waypoint failed to settle: {waypoint}")
         else:
             self.frame += 1
-        return PreparationStep(command, waypoint, progress, completed)
+        return PreparationStep(command, waypoint, progress, completed, arrival)
