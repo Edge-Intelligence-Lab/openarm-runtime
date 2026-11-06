@@ -78,7 +78,7 @@ read-only. Schemas specify encoding, shape, units, frame and freshness requireme
 
 `ActionChunk` contains source observation sequence, start time, step period and
 H x A absolute motor targets with exact ordered names. H=1 is a single-step policy.
-Only `joint_position_rad` is implemented: side order follows configuration, each
+The default robot capability is `joint_position_rad`: side order follows configuration, each
 side has `joint1`…`joint7`, then `gripper_motor`. Stock gripper bounds are left
 0..+65°, right -65°..0; 0 is closed, not aperture in metres. Adapters convert their
 normalized output to these motor radians. Bounds match teleoperation. Invalid
@@ -103,6 +103,12 @@ command timeout, then stops.
 precede robot startup. `stop()`/`pause()` ends the episode and disables; resume means
 a new session/robot with fresh reset, histories and chunk state. Old commands cannot
 survive a pause. A UI can build resume around this explicit contract.
+
+An optional fixed preparation runs after the single startup and before any model
+inference job. It uses feedback-gated absolute joint waypoints, then clears setup
+history and hands off without releasing the device lease or re-enabling motors.
+Task duration excludes preparation. See [fixed preparation](model-adapters.md#fixed-preparation-and-automatic-handoff)
+for configuration, provenance, nominal-geometry trial opt-in and recording phases.
 
 Each CAN bus has its own worker, exclusive lease, existing ArmHold gains and feedback
 validation. All arms preflight before any enable; an early ready arm keeps holding
@@ -168,9 +174,11 @@ openarm-runtime --config /absolute/path/classic.json policy --robot classic \
   --record "$HOME/openarm-episodes/physical-001"
 ```
 
-Policy control rate must match the Classic profile. Cartesian/torque actions need
-a separately implemented, validated controller and capability/schema extension;
-they cannot be implemented by relabeling a position vector.
+Policy control rate must match the Classic profile. The optional explicit
+`cartesian` profile wraps the joint robot with feedback-supervised TCP execution;
+see [model adapters and upright deployment](model-adapters.md). Its separate
+`tcp_pose_xyzw_opening_m` action kind cannot be sent to a joint-only robot. Torque
+actions remain unsupported; never relabel position vectors as another action kind.
 
 ## Recording and replay
 

@@ -56,6 +56,14 @@ def main():
     policy.add_argument("--sides", nargs="+", choices=("left", "right"), default=["left", "right"])
     policy.add_argument("--duration", type=float, default=10)
     policy.add_argument("--record", type=Path, help="New episode directory outside Git")
+    policy.add_argument("--allow-nominal-geometry", action="store_true",
+                        help="Explicit operator trial with declared uncalibrated model geometry; not a calibration assertion")
+    model_serve = commands.add_parser("model-serve", help="Serve an optional model on loopback; never opens robot devices")
+    model_serve.add_argument("--profile", type=Path, required=True, help="Predictor factory/kwargs JSON")
+    model_serve.add_argument("--port", type=int, default=8765)
+    snapshot_command = commands.add_parser("snapshot", help="Read-only disabled-arm feedback; never enable or move")
+    snapshot_command.add_argument("--side", choices=("left", "right"), default="left")
+    snapshot_command.add_argument("--output", type=Path, help="New JSON file outside Git")
     gravity = commands.add_parser("gravity", help="Offline gravity prediction; never opens hardware")
     gravity.add_argument("--profile", type=Path, required=True)
     gravity_input = gravity.add_mutually_exclusive_group(required=True)
@@ -69,6 +77,22 @@ def main():
     from openarm_collection.cli import configure as configure_collection
     configure_collection(commands.add_parser("collection", help="Inspect, review and export demonstration episodes"))
     args = parser.parse_args()
+    if args.command == "snapshot":
+        if args.config is None:
+            parser.error("snapshot requires --config")
+        from .checks import snapshot
+        result = snapshot(Profile.load(args.config), args.side)
+        payload = json.dumps(result, indent=2, allow_nan=False) + "\n"
+        if args.output:
+            with args.output.open("x") as handle:
+                handle.write(payload)
+        else:
+            print(payload, end="")
+        return
+    if args.command == "model-serve":
+        from openarm_policy.models.server import serve
+        serve(json.loads(args.profile.read_text()), args.port)
+        return
     if args.command == "collection":
         from openarm_collection.cli import run
         run(args)

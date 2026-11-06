@@ -34,13 +34,22 @@ is separate from the offline tests.
 `openarm_policy` connects model adapters to timestamped robot/video/tactile
 observations and single-step or chunked joint actions. Inference runs in a separate
 process; Classic CAN control retains independent workers, deadlines and disable
-cleanup. Models and preprocessing stay in your research package.
+cleanup. Model loading and preprocessing live in optional adapters, separate from
+hardware transport; trained weights and datasets remain external assets.
 
 ```sh
 openarm-runtime policy --robot simulate --duration 3
 ```
 
 See [policy contracts, adapters, recording and physical execution](docs/policy.md).
+For reusable checkpoint/input/output plugins and the initial pure-visual ACT
+upright integration, see [model adapters and deployment](docs/model-adapters.md).
+Cartesian policy execution is an explicit geometry-declared capability, not joint-vector
+relabeling; trained-policy hardware acceptance remains separate.
+An optional fixed preparation can connect from actual feedback, move to task-ready,
+open the gripper and hand off to the model in the same operator-started episode.
+Shared bilateral gravity configuration and per-arm feedforward apply beneath all
+these modes; see [gravity configuration](docs/gravity.md#bilateral-deployment-configuration).
 Offline tests and an operator-authorized right-arm policy/gravity trial passed.
 See [measured results and remaining validation boundaries](docs/gravity.md#physical-right-arm-trials).
 

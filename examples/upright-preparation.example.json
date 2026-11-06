@@ -1,0 +1,36 @@
+{
+  "kind": "fixed_joint_waypoints_v1",
+  "side": "left",
+  "start_reference_rad": [0, 0, 0, 0, 0, 0, 0],
+  "start_tolerance_rad": 0.75,
+  "velocity_rad_s": 0.25,
+  "acceleration_rad_s2": 0.75,
+  "gripper_velocity_rad_s": 0.5,
+  "gripper_acceleration_rad_s2": 1.0,
+  "settle_tolerance_rad": 0.01,
+  "settle_samples": 5,
+  "settle_timeout_s": 8.0,
+  "maximum_duration_s": 120.0,
+  "waypoints": [
+    {"name": "swing_out", "joints_rad": [0, -1.2, 0, 0.03, 0, 0, 0]},
+    {"name": "raise_elbow", "joints_rad": [0, -1.2, 0, 1.6, 0, 0, 0]},
+    {
+      "name": "task_ready",
+      "joints_rad": [-0.32495068204051336, -0.6407514128904848, 0.6522804993492397, 1.4264994768656423, 0.7665447122040642, -0.4067009065584856, -1.3529924253826466]
+    },
+    {
+      "name": "open_gripper",
+      "joints_rad": [-0.32495068204051336, -0.6407514128904848, 0.6522804993492397, 1.4264994768656423, 0.7665447122040642, -0.4067009065584856, -1.3529924253826466],
+      "gripper_rad": 0.7854
+    }
+  ],
+  "provenance": {
+    "source": "TacPilot openarm_upright.preparation.waypoints",
+    "asset_revision": "06b4c8ad6d547c3faaa3bf780629ee3e1ac2b0d0",
+    "ready_task_xyz_m": [0.25, 0.2, 0.98],
+    "ready_task_quaternion_wxyz": [0, 0.7071067811865476, -0.7071067811865476, 0],
+    "adaptation": "Start at feedback, retain the initial gripper until ready, and use J4=0.03rad rather than the exact lower bound in the first waypoint",
+    "hardware_validated": false,
+    "collision_scope": "Source simulation geometry only; not real obstacle avoidance"
+  }
+}

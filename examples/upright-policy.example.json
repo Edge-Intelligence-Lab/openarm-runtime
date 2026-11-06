@@ -1,0 +1,64 @@
+{
+  "task": "Right the fallen cylinder, release, retreat and leave it standing independently",
+  "preparation_profile": "upright-preparation.example.json",
+  "session": {
+    "control_hz": 20,
+    "inference_hz": 0.8,
+    "inference_timeout_s": 0.4,
+    "reset_timeout_s": 60,
+    "source_timeout_s": 5,
+    "command_timeout_s": 0.5,
+    "max_horizon_s": 2,
+    "history": 2
+  },
+  "video_profile": "/ABSOLUTE/EXTERNAL/video-policy.json",
+  "policy_kwargs": {
+    "model": {
+      "factory": "openarm_policy.models.http:NumpyHTTP",
+      "kwargs": {
+        "url": "http://127.0.0.1:8765/",
+        "timeout_s": 0.3,
+        "expected_model_sha256": "1ac3efac000201cdc13219c5ad43040f0978fc21f1c66f615000b50435398263"
+      }
+    },
+    "observation": {
+      "factory": "openarm_policy.models.tacpilot:UprightObservation",
+      "kwargs": {"overview": "camera/head", "wrist": "camera/left", "side": "left"}
+    },
+    "action": {
+      "factory": "openarm_policy.models.tacpilot:UprightActions",
+      "kwargs": {
+        "closed_opening_m": null,
+        "open_opening_m": null,
+        "gripper_action_curve": null,
+        "side": "left",
+        "execute_steps": 25,
+        "translation_scale_m": 0.02,
+        "rotation_scale_rad": 0.1
+      }
+    },
+    "period_s": 0.05,
+    "lead_s": 0.0
+  },
+  "cartesian": {
+    "side": "left",
+    "calibration_verified": false,
+    "chain": {
+      "urdf": "/ABSOLUTE/EXTERNAL/expanded-openarm.urdf",
+      "sha256": "REPLACE_WITH_URDF_SHA256",
+      "joints": ["openarm_left_joint1", "openarm_left_joint2", "openarm_left_joint3", "openarm_left_joint4", "openarm_left_joint5", "openarm_left_joint6", "openarm_left_joint7"],
+      "signs": [1, 1, 1, 1, 1, 1, 1],
+      "offsets": [0, 0, 0, 0, 0, 0, 0],
+      "locked": {},
+      "frame": "openarm_left_ee_base_link",
+      "tcp": null
+    },
+    "task_from_base": null,
+    "workspace_m": null,
+    "gripper": {"motor_rad": [], "opening_m": []},
+    "velocity_rad_s": 0.25,
+    "gripper_velocity_rad_s": 0.5,
+    "tracking_limit_rad": 0.15,
+    "feedback_max_age_s": 0.15
+  }
+}

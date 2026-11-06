@@ -235,3 +235,18 @@ class ClassicBus:
             raise RuntimeError(f"ID{mid}: zero write requires stationary disabled motor")
         packet = self.sdk.CanPacketEncoder.create_set_zero_command(self.motors[mid])
         self.send(packet.send_can_id, packet.data)
+
+
+class ReadOnlyBus(ClassicBus):
+    """Packet-level allowlist for feedback and parameter queries only.
+
+    Even accidental calls to inherited control/calibration methods cannot send
+    enable, disable, zero-write, parameter-write or MIT-position packets.
+    """
+    def send(self, can_id, data):
+        packet = bytes(data)
+        if (can_id != 0x7FF or len(packet) != 8 or packet[0] not in IDS
+                or packet[1] != 0 or packet[2] not in (0x33, 0xCC)
+                or any(packet[4:]) or (packet[2] == 0xCC and packet[3] != 0)):
+            raise ValueError("Read-only CAN transport refuses a non-query packet")
+        return super().send(can_id, packet)

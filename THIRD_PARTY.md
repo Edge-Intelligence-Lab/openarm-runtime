@@ -27,3 +27,40 @@
 
 Upstream packages/assets retain their own licenses; the MIT license in this
 repository covers this project's own source, not those separate dependencies.
+
+## TacPilot ACT adapter
+
+`src/openarm_policy/models/act.py` adapts the strict loader, normalization and
+fixed-relative quaternion chart from TacPilot's `policies/act_runtime.py` and
+`policies/act_observation.py`, repository
+`https://github.com/Edge-Intelligence-Lab/tactile_robotics_manipulation`.
+LeRobot, Torch, torchvision and safetensors remain optional external dependencies;
+no model weights or their licenses are bundled.
+
+The upright preparation example also adapts the waypoint recipe from TacPilot's
+`experiments/openarm_upright/preparation.py`, under the same MIT notice. The
+generic setup sequencer and hardware lifecycle remain runtime-owned code.
+
+The adapted TacPilot portions retain this notice:
+
+MIT License
+
+Copyright (c) 2026 TacPilot contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

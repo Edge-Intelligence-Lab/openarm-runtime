@@ -1,0 +1,8 @@
+{
+  "factory": "openarm_policy.models.act:TacPilotACT",
+  "kwargs": {
+    "checkpoint": "/ABSOLUTE/EXTERNAL/ASSETS/models/visual/act/upright",
+    "device": "cpu",
+    "expected_model_sha256": "1ac3efac000201cdc13219c5ad43040f0978fc21f1c66f615000b50435398263"
+  }
+}

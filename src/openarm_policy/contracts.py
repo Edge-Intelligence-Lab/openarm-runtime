@@ -1,10 +1,11 @@
 """Versioned, model-free contracts. Times are host time.monotonic() seconds."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Protocol
 
 VERSION = 1
 POSITION = "joint_position_rad"
+TCP_POSE = "tcp_pose_xyzw_opening_m"
 
 
 def finite(value):
@@ -20,7 +21,7 @@ class ActionSpec:
     version: int = VERSION
 
     def __post_init__(self):
-        if self.version != VERSION or self.kind != POSITION:
+        if self.version != VERSION or self.kind not in (POSITION, TCP_POSE):
             raise ValueError("Unsupported action protocol or kind")
         if not self.names or len(set(self.names)) != len(self.names):
             raise ValueError("Action names must be nonempty and unique")
@@ -28,13 +29,17 @@ class ActionSpec:
             raise ValueError("Bounds must match action names")
         if any(not finite(a) or not finite(b) or a >= b for a, b in zip(self.lower, self.upper)):
             raise ValueError("Invalid action bounds")
+        if self.kind == TCP_POSE and len(self.names) != 8:
+            raise ValueError("TCP actions require xyz, xyzw quaternion and opening in metres")
 
     def validate(self, values):
         if len(values) != len(self.names) or any(
             not finite(v) or not lo <= v <= hi
             for v, lo, hi in zip(values, self.lower, self.upper)
         ):
-            raise ValueError("Action must contain all finite, in-range absolute joint positions")
+            raise ValueError("Action must contain all finite, in-range absolute targets")
+        if self.kind == TCP_POSE and not math.isclose(sum(v*v for v in values[3:7]), 1., abs_tol=1e-6):
+            raise ValueError("TCP quaternion must have unit norm")
 
 
 @dataclass(frozen=True)
@@ -89,6 +94,7 @@ class ActionChunk:
     names: tuple[str, ...]
     kind: str = POSITION
     version: int = VERSION
+    diagnostics: dict = field(default_factory=dict)
 
     @property
     def end_at(self):

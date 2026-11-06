@@ -73,9 +73,11 @@ class EpisodeRecorder:
         self.close()
 
 
-def replay_observations(directory):
+def replay_observations(directory, *, phase=None):
     """Yield saved observations in their original monotonic time domain, offline."""
     root = Path(directory).resolve()
+    if phase not in (None, "task", "preparation"):
+        raise ValueError("Replay phase must be task, preparation or None")
 
     def decode(value):
         if isinstance(value, dict) and set(value) == {"array"}:
@@ -92,6 +94,8 @@ def replay_observations(directory):
         for line in handle:
             event = json.loads(line)
             if event["event"] == "observation":
+                if phase is not None and event.get("phase", "task") != phase:
+                    continue
                 obs = event["observation"]
                 streams = {name: tuple(SensorSample(**dict(s, data=decode(s["data"]))) for s in history)
                            for name, history in obs["streams"].items()}
