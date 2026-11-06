@@ -77,7 +77,7 @@ def main():
         from .gravity import load_gravity, diagnose_episode
         if args.episode and args.side is None:
             parser.error("gravity --episode requires --side")
-        compensation = load_gravity(args.profile)
+        compensation = load_gravity(args.profile, side=args.side)
         result = (diagnose_episode(compensation, args.episode, args.side) if args.episode else
                   {"model": compensation.metadata(), "gravity_nm": compensation.model.torques(args.positions)})
         print(json.dumps(result, indent=2))

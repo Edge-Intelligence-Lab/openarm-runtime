@@ -175,14 +175,81 @@ class GravityCompensation:
                     slew_nm_s=self.slew, ramp_s=self.ramp_s, scale=self.scale)
 
 
-def load_gravity(path):
+def select_gravity_config(config, side):
+    """Resolve a bilateral profile without importing scientific dependencies.
+
+    Model identity/mounting is shared; mapping, payload and bounds are arm-owned.
+    Legacy single-arm profiles remain readable for archived episode diagnostics.
+    """
+    if not isinstance(config, dict):
+        raise ValueError("Expected gravity profile object")
+    if "schema" not in config:
+        return dict(config)
+    shared = {"schema", "urdf", "urdf_sha256", "gravity_m_s2", "arms"}
+    if set(config) != shared or config["schema"] != "openarm.gravity.bimanual.v1":
+        raise ValueError("Invalid bilateral gravity schema or fields")
+    if side not in ("left", "right"):
+        raise ValueError("Bilateral gravity requires an explicit side")
+    arms = config["arms"]
+    if not isinstance(arms, dict) or set(arms) != {"left", "right"}:
+        raise ValueError("Bilateral gravity requires both arms")
+    required = {"joints", "signs", "offsets_rad", "locked_joints", "mode", "limits_nm", "slew_nm_s"}
+    names = []
+    for arm in arms.values():
+        if not isinstance(arm, dict) or required - set(arm) or set(arm) - required - {"ramp_s", "scale", "payload"}:
+            raise ValueError("Invalid bilateral arm fields")
+        joints = arm["joints"]
+        if not isinstance(joints, list) or len(joints) != 7 or any(not isinstance(n, str) for n in joints):
+            raise ValueError("Each arm requires seven joint names")
+        names.extend(joints)
+    if len(set(names)) != 14:
+        raise ValueError("Left/right gravity mappings must be disjoint")
+    return {key: config[key] for key in ("urdf", "urdf_sha256", "gravity_m_s2")} | dict(arms[side])
+
+
+def validate_arm_branch(config, bundle, side, root):
+    """Require independent fixed-base branches, not a coupled serial mechanism."""
+    xml = ET.fromstring((Path(root) / config["urdf"]).expanduser().read_bytes())
+    parents = {j.find("child").get("link"): j for j in xml.findall("joint")}
+    joints = {j.get("name"): j for j in xml.findall("joint")}
+
+    def ancestors(link):
+        result = []
+        while link in parents:
+            joint = parents[link]
+            result.append(joint.get("name"))
+            link = joint.find("parent").get("link")
+        return result
+
+    for arm_side, arm in bundle["arms"].items():
+        branch = arm["joints"]
+        for index, name in enumerate(branch):
+            if name not in joints:
+                raise ValueError(f"Unknown gravity joint: {name}")
+            chain = ancestors(joints[name].find("child").get("link"))
+            movable = [n for n in reversed(chain) if joints[n].get("type") != "fixed"]
+            if movable != branch[:index+1]:
+                raise ValueError(f"{arm_side} gravity must map an ordered independent fixed-base branch")
+        payload = arm.get("payload")
+        if payload is not None and (not isinstance(payload, dict)
+                or branch[-1] not in ancestors(payload.get("link"))):
+            raise ValueError(f"{arm_side} payload must attach downstream of its last arm joint")
+
+
+def load_gravity(path, *, side=None):
     path = Path(path).expanduser().resolve()
-    config = json.loads(path.read_text())
+    bundle = json.loads(path.read_text())
+    config = select_gravity_config(bundle, side)
     required = {"urdf", "urdf_sha256", "joints", "signs", "offsets_rad", "gravity_m_s2",
                 "locked_joints", "mode", "limits_nm", "slew_nm_s"}
     if not isinstance(config, dict) or required - set(config) or set(config) - required - {"ramp_s", "scale", "payload"}:
         raise ValueError("Invalid gravity profile keys")
+    if "schema" in bundle:
+        validate_arm_branch(config, bundle, side, path.parent)
     model = GravityModel(config, path.parent)
+    if "schema" in bundle:
+        model.metadata.update(schema=bundle["schema"], side=side,
+                              profile_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
     return GravityCompensation(model, **{k: config[k] for k in
         ("mode", "limits_nm", "slew_nm_s", "ramp_s", "scale") if k in config})
 
@@ -202,6 +269,8 @@ def diagnose_episode(compensation, directory, side):
     from openarm_policy.recording import replay_observations
     if side not in ("left", "right"):
         raise ValueError("Select recorded side explicitly")
+    if compensation.model.metadata.get("side", side) != side:
+        raise ValueError("Gravity model side does not match recorded side")
     rows = [[] for _ in range(8)]
     previous = None
     for observation in replay_observations(directory):

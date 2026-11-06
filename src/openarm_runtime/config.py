@@ -57,7 +57,7 @@ class Profile:
         if not self.gravity or side not in self.gravity:
             return None
         from .gravity import load_gravity
-        return load_gravity(self.gravity[side])
+        return load_gravity(self.gravity[side], side=side)
 
     def interface(self, side: str):
         if side not in ("left", "right"):

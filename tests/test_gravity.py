@@ -123,6 +123,73 @@ class ModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):diagnose_episode(c,directory,"left")
 
 
+class BilateralTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        single = fixture(self.root)
+        text = (self.root/"robot.urdf").read_text()
+        body = text.split('<link name="base"/>', 1)[1].removesuffix('</robot>')
+        left = body
+        right = body
+        for i in range(7):
+            left = left.replace(f'"j{i}"', f'"left_j{i}"').replace(f'"l{i}"', f'"left_l{i}"')
+            right = right.replace(f'"j{i}"', f'"right_j{i}"').replace(f'"l{i}"', f'"right_l{i}"')
+        text = '<robot name="dual"><link name="base"/>' + left + right + '</robot>'
+        (self.root/"robot.urdf").write_text(text)
+        arms = {}
+        for side, other in (("left", "right"), ("right", "left")):
+            arms[side] = {k: v for k, v in single.items() if k not in ("urdf", "urdf_sha256", "gravity_m_s2")}
+            arms[side].update(joints=[f"{side}_j{i}" for i in range(7)],
+                              locked_joints={f"{other}_j{i}": 0 for i in range(7)})
+        self.bundle = dict(schema="openarm.gravity.bimanual.v1", urdf="robot.urdf",
+                           urdf_sha256=hashlib.sha256(text.encode()).hexdigest(),
+                           gravity_m_s2=[0, 0, -9.81], arms=arms)
+        self.path = self.root/"gravity.json"
+
+    def save(self):
+        self.path.write_text(json.dumps(self.bundle))
+
+    def test_schema_side_and_overlap_fail_without_optional_dependencies(self):
+        from openarm_runtime.gravity import select_gravity_config
+        for side in (None, "both", "typo"):
+            with self.assertRaises(ValueError): select_gravity_config(self.bundle, side)
+        self.bundle["arms"]["right"]["joints"] = self.bundle["arms"]["left"]["joints"]
+        with self.assertRaises(ValueError): select_gravity_config(self.bundle, "left")
+
+    def test_branch_order_and_foreign_payload_rejected(self):
+        from openarm_runtime.gravity import select_gravity_config, validate_arm_branch
+        self.bundle["arms"]["left"]["joints"].reverse()
+        with self.assertRaises(ValueError):
+            validate_arm_branch(select_gravity_config(self.bundle, "left"), self.bundle, "left", self.root)
+        self.bundle["arms"]["left"]["joints"].reverse()
+        self.bundle["arms"]["left"]["payload"] = dict(link="right_l6", mass_kg=1, com_m=[0, 0, 0])
+        with self.assertRaises(ValueError):
+            validate_arm_branch(select_gravity_config(self.bundle, "right"), self.bundle, "right", self.root)
+
+    def test_both_sides_identical_statics_independent_state_and_profile_routing(self):
+        try:
+            import pinocchio
+        except ImportError:
+            self.skipTest("optional gravity extra")
+        self.save()
+        profile = Profile("can1", "can0", gravity={s: str(self.path) for s in ("left", "right")})
+        left, right = profile.make_gravity("left"), profile.make_gravity("right")
+        q = [.1]*7+[0]
+        self.assertEqual(left.model.torques(q), right.model.torques(q))
+        before = right.model.torques(q)
+        left.model.torques([.2]*7+[0])
+        self.assertEqual(before, right.model.torques(q))
+        self.assertIsNot(left.model.data, right.model.data)
+        self.assertEqual(left.metadata()["side"], "left")
+        self.assertEqual(right.metadata()["side"], "right")
+        self.assertEqual(left.metadata()["profile_sha256"], right.metadata()["profile_sha256"])
+        from openarm_runtime.gravity import diagnose_episode
+        with self.assertRaisesRegex(ValueError, "side does not match"):
+            diagnose_episode(left, self.root/"nonexistent", "right")
+
+
 class CompensationTests(unittest.TestCase):
     def compensation(self, mode="active"):
         model = Mock(metadata={})

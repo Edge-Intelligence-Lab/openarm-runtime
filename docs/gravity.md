@@ -5,7 +5,44 @@ dependency-free; NumPy/Pinocchio load only when a gravity profile is constructed
 This implements static gravity feedforward, not inverse dynamics, an integral
 controller, friction identification, or a gravity-only hand-guiding mode.
 
-## Control contract
+## Bilateral deployment configuration
+
+New deployments use one `openarm.gravity.bimanual.v1` file, illustrated by
+`examples/gravity-bimanual.example.json`. Model path/hash and root-frame gravity
+are shared. Both `arms.left` and `arms.right` explicitly declare ordered joint
+mapping, signs/offsets, all locked joints, mode, limits, slew, ramp, scale and
+optional payload. No right-to-left sign guessing or implicit mass calibration is
+performed. The example has nominal stock inertia, no added tactile payload, and
+closed finger geometry; these assumptions must be recorded in deployment receipts.
+Its J1/J2 feedforward caps are 12 Nm (rather than the historical 10 Nm): the pinned
+stock model predicts about 10.9 Nm in the audited preparation/workspace samples.
+These are feedforward caps, not total-effort or collision-safety guarantees;
+firmware range preflight and combined PD/feedforward supervision still apply.
+
+The Classic machine profile routes **both sides to the same file**:
+
+```json
+"gravity": {"left": "gravity-bimanual.json", "right": "gravity-bimanual.json"}
+```
+
+`Profile.make_gravity(side)` and offline `gravity --side left|right` select the
+arm explicitly. Each worker has independent Pinocchio data, ramp and slew state;
+configuring two arms never enables the unselected arm. Existing `ArmHold` applies
+the same feedforward beneath hold, joint/Cartesian teleoperation and policy/fixed
+preparation. Model/profile hashes and selected side are recorded with gravity events.
+
+The loader rejects overlapping mappings, out-of-order or coupled branches and
+payloads attached to the other arm. The fixed-base branch requirement is important:
+locking the other arm is valid for this robot's independent static branches, not
+for floating-base/coupled robots. Finger poses remain an explicit static assumption;
+motor ID8 receives no gravity torque. There is no automatic payload identification.
+
+Legacy single-arm files remain readable for old recordings, but are no longer the
+recommended deployment format. Historical right-arm trials are not bilateral
+hardware acceptance. Example `shadow` mode sends zero gravity torque, **but ordinary
+hold/policy still enables PD**; only offline episode diagnostics are motion-free.
+
+## Control calculation
 
 At each control exchange, the latest measured motor angles are mapped into the
 URDF: `q_model[i] = signs[i] * q_motor[i] + offsets_rad[i]`. Pinocchio computes
@@ -30,7 +67,7 @@ or motor coordinates. Changing mount orientation changes this vector.
 
 ## Configuration
 
-Copy `examples/gravity-right.json` outside the checkout and set `urdf` relative to
+Copy `examples/gravity-bimanual.example.json` outside the checkout and set `urdf` relative to
 that JSON file. It references the official OpenArm v2 visual model's expanded URDF
 (description revision `2e27c793e10aa2045e7eb597b9b9dc08fb0a08`), already used by the
 viewer. It is an initial **shadow** configuration, not a physically calibrated
@@ -38,10 +75,10 @@ dynamics model. Signs/offsets, gravity direction, mass/COM accuracy and limits m
 match the actual machine. The example torque caps are commissioning settings, not
 manufacturer continuous-torque ratings. The original zero calibration is not changed.
 
-Add the per-side path to the existing Classic machine JSON:
+Add both side paths to the existing Classic machine JSON:
 
 ```json
-"gravity": {"right": "gravity-right.json"}
+"gravity": {"left": "gravity-bimanual.json", "right": "gravity-bimanual.json"}
 ```
 
 These paths resolve relative to the machine profile. Python-created Profile objects
@@ -73,7 +110,7 @@ sensor/cable/tool mass and COM belong here or in a separately hash-pinned URDF.
 ## Offline inspection (never opens CAN)
 
 ```sh
-openarm-runtime gravity --profile /path/gravity-right.json \
+openarm-runtime gravity --profile /path/gravity-bimanual.json --side left \
   --positions 0 0 0 0 0 0 0 0
 ```
 
@@ -83,7 +120,7 @@ through `compensation.model.torques(...)` for offline comparison. Compare at the
 same measured pose/time; moving PD effort and friction are not gravity ground truth.
 
 ```sh
-openarm-runtime gravity --profile /path/gravity-right.json \
+openarm-runtime gravity --profile /path/gravity-bimanual.json \
   --episode /path/to/recorded-policy-episode --side right
 ```
 
