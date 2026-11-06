@@ -7,7 +7,7 @@
   "acceleration_rad_s2": 0.75,
   "gripper_velocity_rad_s": 0.5,
   "gripper_acceleration_rad_s2": 1.0,
-  "settle_tolerance_rad": 0.01,
+  "settle_tolerance_rad": 0.03490658503988659,
   "settle_samples": 5,
   "settle_timeout_s": 8.0,
   "maximum_duration_s": 120.0,

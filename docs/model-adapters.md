@@ -183,6 +183,13 @@ by model-load or offline regressions.
 
 ## Fixed preparation and automatic handoff
 
+The upright example uses a 2-degree (0.0349066 rad) joint arrival tolerance for
+five consecutive samples, rather than a sub-degree precision requirement. This
+is a task-start acceptance region for low-cost hardware, not a calibrated
+accuracy claim. Arrival tolerance is separate from tracking-abort limits, speed,
+joint bounds and feedback freshness; those protections remain unchanged. Other
+tasks can supply their own tolerance without changing the generic sequencer.
+
 The optional inline `preparation` object or a `preparation_profile` JSON path
 (relative to the policy profile) selects `kind: "fixed_joint_waypoints_v1"`.
 Only one may be supplied. The generic sequencer lives in

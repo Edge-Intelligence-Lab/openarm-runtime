@@ -1,6 +1,7 @@
 """Fixed setup and learned-policy handoff, only synthetic plants or mocks."""
 from dataclasses import replace
 import math
+import json
 import time
 from pathlib import Path
 import tempfile
@@ -81,6 +82,32 @@ class PreparationTests(unittest.TestCase):
             for frame in range(200):
                 completed |= stage.step(observation(actual, 10+frame*.05)).completed
         self.assertFalse(completed)
+
+    def test_upright_arrival_accepts_small_bias_but_not_large_error(self):
+        options = json.loads((Path(__file__).resolve().parents[1]/
+                              "examples/upright-preparation.example.json").read_text())
+        options.pop("kind")
+        options["waypoints"] = options["waypoints"][:1]
+        options["start_reference_rad"] = None
+        self.assertAlmostEqual(options["settle_tolerance_rad"], math.radians(2))
+        for error_deg, accepted in ((1.2, True), (4.8, False)):
+            stage = FixedJointPreparation(**options)
+            self.bind(stage)
+            actual = list(options["waypoints"][0]["joints_rad"]) + [.01]
+            actual[4] += math.radians(error_deg)
+            stage.begin(observation(actual))
+            if accepted:
+                for frame in range(100):
+                    step = stage.step(observation(actual, 10+frame*.05))
+                    if step.completed:
+                        self.assertEqual(stage.stable, 5)
+                        break
+                else:
+                    self.fail("Acceptable preparation bias never settled")
+            else:
+                with self.assertRaises(TimeoutError):
+                    for frame in range(300):
+                        self.assertFalse(stage.step(observation(actual, 10+frame*.05)).completed)
 
     def test_stale_tracking_far_start_and_timeouts_reject(self):
         stage = recipe()
