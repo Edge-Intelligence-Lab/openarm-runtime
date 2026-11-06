@@ -7,25 +7,68 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from openarm_policy.contracts import ActionSpec, Context, Observation, SensorSample, StreamSpec, TCP_POSE
+from openarm_policy.contracts import ActionChunk, ActionSpec, Context, Observation, SensorSample, StreamSpec, TCP_POSE
 from openarm_policy.models.policy import ModelPolicy
 
 
 NUMERIC = all(importlib.util.find_spec(name) for name in ("numpy", "scipy"))
 
 
-def context(side="left"):
+def context(side="left", execution=None):
     names = tuple(f"{side}.{n}" for n in ("x", "y", "z", "qx", "qy", "qz", "qw", "opening"))
     action = ActionSpec(names, (-2.,)*3 + (-1.,)*4 + (0.,),
                         (2.,)*3 + (1.,)*4 + (.1,), kind=TCP_POSE)
-    return Context(action, (StreamSpec(f"target/{side}", TCP_POSE, (8,), "m,xyzw,m", "task"),), 20)
+    return Context(action, (StreamSpec(f"target/{side}", TCP_POSE, (8,), "m,xyzw,m", "task"),), 20,
+                   execution={} if execution is None else execution)
+
+
+def progress_receipt(side="left", translation=.002, rotation=.015):
+    return {"cartesian_progress": {"side": side, "maximum_translation_step_m": translation,
+                                    "maximum_rotation_step_rad": rotation, "feedback_pacing": True}}
+
+
+class ResetAbsolutePolicy:
+    """Picklable reset probe for the actual spawned inference lifecycle."""
+    def __init__(self, path):
+        self.path = path
+        # A policy's claim must never substitute for the runtime's receipt.
+        self.metadata = {"execution": progress_receipt()}
+
+    def reset(self, context):
+        from openarm_policy.models.tacpilot import AbsoluteUprightActions
+        AbsoluteUprightActions(self.path, .01, .07).reset(context)
+
+    def infer(self, observation):
+        raise AssertionError("Reset rejection must precede inference")
+
+    def close(self):
+        pass
 
 
 class BindingTests(unittest.TestCase):
+    def test_context_execution_defaults_preserve_positional_version(self):
+        old = Context(context().action, (), 20, "task", 1)
+        self.assertEqual(old.version, 1)
+        self.assertEqual(old.execution, {})
+        old.execution["test"] = True
+        self.assertEqual(Context(context().action, (), 20).execution, {})
+
+    def test_session_uses_only_robot_execution_and_copies_receipt(self):
+        from openarm_policy.session import PolicySession
+        policy = SimpleNamespace(metadata={"execution": progress_receipt()})
+        robot = SimpleNamespace(spec=context().action, streams=())
+        self.assertEqual(PolicySession(robot, policy).context.execution, {})
+        robot.execution = progress_receipt()
+        session = PolicySession(robot, policy)
+        self.assertEqual(session.context.execution, robot.execution)
+        robot.execution["cartesian_progress"]["maximum_translation_step_m"] = .01
+        self.assertEqual(session.context.execution, progress_receipt())
+
     def bind(self, model_meta, decoder_meta, encoder_meta=None):
         objects = [Mock(metadata=model_meta), Mock(metadata=encoder_meta or {}), Mock(metadata=decoder_meta)]
         policy = ModelPolicy({}, {}, {})
@@ -90,8 +133,105 @@ class AbsoluteGoalTests(unittest.TestCase):
     def decoder(self, **kwargs):
         from openarm_policy.models.tacpilot import AbsoluteUprightActions
         decoder = AbsoluteUprightActions(str(self.path), .01, .09, **kwargs)
-        decoder.reset(context(kwargs.get("side", "left")))
+        side = kwargs.get("side", "left")
+        decoder.reset(context(side, progress_receipt(side)))
         return decoder
+
+    def test_required_governor_finite_caps_side_and_feedback_pacing(self):
+        decoder = self.decoder()
+        for translation, rotation in ((.002, .015), (.001, .01)):
+            decoder.reset(context(execution=progress_receipt(translation=translation, rotation=rotation)))
+        invalid = [{}, None, [], {"cartesian_progress": None}, progress_receipt("right"),
+                   progress_receipt(translation=.002001), progress_receipt(rotation=.015001)]
+        for key in ("maximum_translation_step_m", "maximum_rotation_step_rad"):
+            for value in (None, True, "0.001", 0, -1, math.nan, math.inf, 10**500):
+                receipt = progress_receipt()
+                receipt["cartesian_progress"][key] = value
+                invalid.append(receipt)
+            receipt = progress_receipt()
+            del receipt["cartesian_progress"][key]
+            invalid.append(receipt)
+        for value in (False, 1, "true", None):
+            receipt = progress_receipt()
+            receipt["cartesian_progress"]["feedback_pacing"] = value
+            invalid.append(receipt)
+        for execution in invalid:
+            with self.subTest(execution=execution), self.assertRaises(ValueError):
+                decoder.reset(context(execution=execution))
+
+    def test_session_rejects_missing_or_looser_governor_before_start(self):
+        from openarm_policy.session import PolicySession
+        for receipt in ({}, progress_receipt(translation=.003), progress_receipt(rotation=.02),
+                        progress_receipt("right")):
+            with self.subTest(receipt=receipt):
+                robot = SimpleNamespace(spec=context().action, streams=context().streams,
+                                        execution=receipt, start=Mock(), close=Mock())
+                session = PolicySession(robot, ResetAbsolutePolicy(str(self.path)))
+                with self.assertRaisesRegex(RuntimeError, "Policy reset failed"):
+                    session.run(duration_s=.01)
+                robot.start.assert_not_called()
+                robot.close.assert_called_once()
+                self.assertEqual(session.state, "failed")
+
+    def cartesian_robot(self, progress):
+        from openarm_policy.cartesian import CartesianRobot
+        from openarm_policy.robots import SimulatedRobot
+        transform = self.np.eye(4)
+        transform[:3, 3] = self.contract["position_anchor_m"]
+        transform[:3, :3] = self.R.from_quat(self.contract["reference_xyzw"]).as_matrix()
+        chain = Mock(indices=list(range(7)), metadata={"fixture": True})
+        chain.forward.return_value = transform
+        plant = SimulatedRobot(("left",))
+        config = dict(side="left", calibration_verified=True, chain={},
+                      task_from_base=self.np.eye(4).tolist(), workspace_m=[[-1]*3, [1]*3],
+                      gripper={"motor_rad": [0, 1.], "opening_m": [0, .1]}, progress=progress)
+        with patch("openarm_runtime.cartesian.KinematicChain", return_value=chain):
+            robot = CartesianRobot(plant, config)
+        self.addCleanup(robot.close)
+        return robot
+
+    def test_cartesian_receipt_is_read_only_and_derived_from_live_governor(self):
+        robot = self.cartesian_robot(None)
+        self.assertEqual(robot.execution, {})
+        robot = self.cartesian_robot({"translation_step_m": .001, "rotation_step_rad": .01})
+        self.assertEqual(robot.execution, progress_receipt(translation=.001, rotation=.01))
+        robot.config["progress"]["translation_step_m"] = .009
+        receipt = robot.execution
+        receipt["cartesian_progress"]["maximum_translation_step_m"] = .009
+        self.assertEqual(robot.execution, progress_receipt(translation=.001, rotation=.01))
+        with self.assertRaises(AttributeError): robot.execution = {}
+        from openarm_policy.session import PolicySession
+        session = PolicySession(robot, ResetAbsolutePolicy(str(self.path)))
+        self.decoder().reset(session.context)
+
+    def test_skipped_prefix_is_governed_from_actual_dispatched_fk_at_first_submit(self):
+        from openarm_policy.session import PolicySession
+        robot = self.cartesian_robot({})
+        decoder = self.decoder(execute_steps=100)
+        decoder.reset(PolicySession(robot, ResetAbsolutePolicy(str(self.path))).context)
+        solver = Mock()
+        solver.step.return_value = dict(joints=[0.]*7, position_error_m=0., orientation_error_rad=0., solve_s=0.)
+        with patch("openarm_runtime.cartesian.DifferentialIK", return_value=solver):
+            robot.start()
+        dispatched = self.np.asarray(robot.snapshot()["target/left"].data)
+        steps = decoder.decode(self.np.tile([1., 0, 0, 0, 0, 1., 0], (100, 1)), self.observation())
+        active = ActionChunk(1, 10., .05, tuple(tuple(float(v) for v in row) for row in steps),
+                             robot.spec.names, kind=TCP_POSE)
+        requested = active.at(11.251)  # First dispatch skips rows 0..24.
+        self.assertEqual(requested, active.steps[25])
+        self.assertGreater(self.np.linalg.norm(self.np.asarray(requested[:3])-dispatched[:3]), .05)
+        self.assertGreater((self.R.from_quat(requested[3:7]) * self.R.from_quat(dispatched[3:7]).inv()).magnitude(), .3)
+        robot.submit(requested, time.monotonic()+1)
+        governed = solver.step.call_args.args[1]
+        # This is the actual submit() governor output reaching IK, not decoder rows.
+        self.assertAlmostEqual(self.np.linalg.norm(governed[:3, 3]-dispatched[:3]), .002)
+        turn = self.R.from_matrix(governed[:3, :3]) * self.R.from_quat(dispatched[3:7]).inv()
+        self.assertAlmostEqual(turn.magnitude(), .015)
+        self.assertEqual(len(robot.robot.commands), 1)
+        # Feedback pacing still holds instead of advancing IK when joints lag.
+        robot.reference[0] = .08
+        robot.submit(requested, time.monotonic()+1)
+        self.assertEqual(solver.step.call_count, 1)
 
     def observation(self, position=None, rotation=None, side="left"):
         if position is None:

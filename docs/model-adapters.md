@@ -262,10 +262,24 @@ valid SHA256 fingerprints to match before robot startup; mismatch triggers norma
 component cleanup. Neither publishing a fingerprint preserves legacy behavior.
 Even whitespace changes require a matching checkpoint/decoder file identity.
 
-The Cartesian executor independently clips/holds against actual dispatched FK;
-decoder bounds do not replace that governor, joint/velocity limits, watchdogs,
-calibration checks or operator authorization. No physical readiness or learned
-waiting/task success is implied. Offline regression command:
+**A matching executor governor is required, not optional for this decoder.**
+`PolicySession` obtains generic `Context.execution` capabilities from the actual
+robot, not from model/policy metadata. `CartesianRobot.execution` publishes a
+fresh read-only receipt derived from its active `progress` instance (or `{}`
+when disabled): `cartesian_progress` contains `side`,
+`maximum_translation_step_m`, `maximum_rotation_step_rad` and
+`feedback_pacing: true`. Absolute-decoder reset rejects missing capabilities,
+wrong-side receipts, absent feedback pacing, or nonfinite/nonpositive/looser
+bounds **before robot startup**. Equal or stricter executor caps are accepted;
+legacy decoders do not require this capability.
+
+Decoder-local bounds only constrain consecutive predicted rows: latency can
+make `ActionChunk.at()` skip a prefix and first select a much farther row.
+The required Cartesian executor independently clips that selected goal relative
+to actual dispatched FK and holds on tracking lag. Decoder bounds never replace
+the governor, joint/velocity limits, watchdogs, calibration checks or operator
+authorization. No physical readiness or learned waiting/task success is implied.
+Offline regression command:
 
 ```sh
 PYTHONPATH=src python -m unittest discover -s tests -p 'test_absolute_goal_adapters.py' -v

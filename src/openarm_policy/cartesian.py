@@ -105,6 +105,18 @@ class CartesianRobot:
             self.streams += (StreamSpec(f"execution/{self.side}", "waiting_joint_error", (2,),
                                         "bool,rad", "motor", self.max_age),)
 
+    @property
+    def execution(self):
+        """Fresh read-only receipt of the governor actually used by submit()."""
+        if self.progress is None:
+            return {}
+        return {"cartesian_progress": {
+            "side": self.side,
+            "maximum_translation_step_m": self.progress.translation,
+            "maximum_rotation_step_rad": self.progress.rotation,
+            "feedback_pacing": True,
+        }}
+
     def begin_preparation(self):
         if self.reference is None or self.preparing:
             raise RuntimeError("Cartesian preparation requires a started, idle robot")

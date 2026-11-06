@@ -1,5 +1,6 @@
 """Episode orchestration; policies never access the robot or own its control loop."""
 from dataclasses import dataclass, asdict
+from copy import deepcopy
 import threading
 import time
 
@@ -44,7 +45,8 @@ class PolicySession:
         self.sources = tuple(sources)
         self.config = config or SessionConfig()
         self.context = Context(robot.spec, tuple(robot.streams) + tuple(
-            s for source in sources for s in source.streams), self.config.control_hz, task)
+            s for source in sources for s in source.streams), self.config.control_hz, task,
+            execution=deepcopy(getattr(robot, "execution", {})))
         self.buffer = ObservationBuffer(self.context.streams, self.config.history)
         self.recorder = recorder
         self.on_event = on_event

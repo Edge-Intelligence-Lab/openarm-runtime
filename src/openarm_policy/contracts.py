@@ -83,6 +83,8 @@ class Context:
     control_hz: float
     task: str = ""
     version: int = VERSION
+    # Runtime-owned executor capabilities, not policy/model declarations.
+    execution: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

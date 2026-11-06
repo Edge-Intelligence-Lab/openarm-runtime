@@ -203,6 +203,24 @@ class AbsoluteUprightActions(UprightActions):
         self.metadata.update(action_semantics=contract["schema"], action_contract=contract,
                              action_contract_sha256=hashlib.sha256(raw).hexdigest())
 
+    def reset(self, context):
+        import math
+        super().reset(context)
+        execution = context.execution
+        capability = execution.get("cartesian_progress") if isinstance(execution, dict) else None
+        if (not isinstance(capability, dict) or capability.get("side") != self.side
+                or capability.get("feedback_pacing") is not True):
+            raise ValueError("Absolute goals require a same-side feedback-paced Cartesian execution governor")
+        for key in ("maximum_translation_step_m", "maximum_rotation_step_rad"):
+            value = capability.get(key)
+            try:
+                valid = (type(value) in (int, float) and math.isfinite(value)
+                         and 0 < value <= self.contract[key])
+            except OverflowError:
+                valid = False
+            if not valid:
+                raise ValueError(f"Cartesian execution governor exceeds or lacks absolute goal bound: {key}")
+
     def decode(self, output, observation):
         import numpy as np
         from scipy.spatial.transform import Rotation
