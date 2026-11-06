@@ -69,6 +69,9 @@ class TacPilotACT:
                          "files_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                           for p in root.iterdir() if p.suffix in (".json", ".safetensors")
                                           and p.name != "model.safetensors"}}
+        if "action-contract.json" in self.metadata["files_sha256"]:
+            # Identity only: action semantics belong to the selected decoder.
+            self.metadata["action_contract_sha256"] = self.metadata["files_sha256"]["action-contract.json"]
 
     def relative_state(self, state):
         import numpy as np

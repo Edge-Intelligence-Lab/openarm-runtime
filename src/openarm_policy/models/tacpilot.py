@@ -152,3 +152,86 @@ class UprightActions:
                 opening = float(np.interp(row[6], curve[:, 0], curve[:, 1]))
             result.append(np.r_[position, rotation.as_quat(), opening])
         return result
+
+
+class AbsoluteUprightActions(UprightActions):
+    """Opt-in fixed-home absolute goal7, bounded from own dispatched reference.
+
+    A predicted row is a destination, never an increment. Chunk-local references
+    advance only toward that destination; subsequent calls re-anchor to target/side.
+    The executor independently governs actual dispatched FK and hardware limits.
+    """
+    def __init__(self, action_contract, closed_opening_m, open_opening_m, side="left",
+                 execute_steps=25, gripper_action_curve=None):
+        import hashlib
+        import json
+        import math
+        from pathlib import Path
+        import numpy as np
+
+        raw = Path(action_contract).read_bytes()
+        contract = json.loads(raw)
+        if not isinstance(contract, dict) or contract.get("schema") != "tacpilot.absolute-cartesian-goals.v1":
+            raise ValueError("Unsupported absolute Cartesian goal contract")
+
+        def number(value):
+            try:
+                return type(value) in (int, float) and math.isfinite(value)
+            except OverflowError:
+                return False
+
+        for key, width in (("position_anchor_m", 3), ("reference_xyzw", 4)):
+            value = contract.get(key)
+            if not isinstance(value, list) or len(value) != width or not all(number(v) for v in value):
+                raise ValueError(f"Invalid absolute goal {key}")
+        if not math.isclose(np.linalg.norm(contract["reference_xyzw"]), 1., abs_tol=1e-6, rel_tol=0):
+            raise ValueError("Absolute goal reference must be a unit quaternion")
+        for key in ("position_scale_m", "rotation_scale_rad",
+                    "maximum_translation_step_m", "maximum_rotation_step_rad"):
+            value = contract.get(key)
+            if not number(value) or value <= 0:
+                raise ValueError(f"Invalid absolute goal {key}")
+        if not math.isclose(contract["rotation_scale_rad"], math.pi, abs_tol=1e-12, rel_tol=0):
+            raise ValueError("Absolute goal rotation scale must be pi")
+        # Never permit a larger physical step than the original normalized delta
+        # interface. Tighter task-specific caps belong to the bound contract file.
+        if contract["maximum_translation_step_m"] > .02 or contract["maximum_rotation_step_rad"] > .1:
+            raise ValueError("Absolute goal step exceeds original physical action bounds")
+        super().__init__(closed_opening_m, open_opening_m, side, execute_steps,
+                         gripper_action_curve=gripper_action_curve)
+        self.contract = contract
+        self.metadata.update(action_semantics=contract["schema"], action_contract=contract,
+                             action_contract_sha256=hashlib.sha256(raw).hexdigest())
+
+    def decode(self, output, observation):
+        import numpy as np
+        from scipy.spatial.transform import Rotation
+
+        actions = np.asarray(output)
+        if (actions.ndim != 2 or actions.shape[1] != 7 or len(actions) < self.count
+                or actions.dtype.kind not in "fiu" or not np.isfinite(actions).all()):
+            raise ValueError("Expected a finite H x 7 absolute goal prediction")
+        actions = np.clip(actions[:self.count], -1, 1)
+        anchor = np.asarray(latest(observation, f"target/{self.side}"), dtype=float)
+        if (anchor.shape != (8,) or not np.isfinite(anchor).all()
+                or not np.isclose(np.linalg.norm(anchor[3:7]), 1., atol=1e-6, rtol=0)):
+            raise ValueError("Invalid dispatched Cartesian anchor")
+        position, rotation = anchor[:3].copy(), Rotation.from_quat(anchor[3:7])
+        contract = self.contract
+        reference = Rotation.from_quat(contract["reference_xyzw"])
+        result = []
+        for row in actions:
+            goal_position = np.asarray(contract["position_anchor_m"]) + row[:3] * contract["position_scale_m"]
+            goal_rotation = reference * Rotation.from_rotvec(row[3:6] * contract["rotation_scale_rad"])
+            dp = goal_position - position
+            dr = (goal_rotation * rotation.inv()).as_rotvec()
+            dp *= min(1., contract["maximum_translation_step_m"] / max(np.linalg.norm(dp), 1e-12))
+            dr *= min(1., contract["maximum_rotation_step_rad"] / max(np.linalg.norm(dr), 1e-12))
+            position = position + dp
+            rotation = Rotation.from_rotvec(dr) * rotation
+            opening = self.closed + (1-row[6])/2 * (self.open-self.closed)
+            if self.gripper_curve is not None:
+                curve = np.asarray(self.gripper_curve)
+                opening = float(np.interp(row[6], curve[:, 0], curve[:, 1]))
+            result.append(np.r_[position, rotation.as_quat(), opening])
+        return result

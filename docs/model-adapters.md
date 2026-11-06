@@ -222,6 +222,55 @@ extra features. Real LeRobot runtime/source backend parity was exact for three
 execution-feedback inputs, but this is not evidence of learned waiting or task
 success. Fine-tuning and independent development evaluation remain required.
 
+## Optional absolute normalized Cartesian goal7
+
+`models.tacpilot:AbsoluteUprightActions` is an **opt-in, untrained candidate**,
+not a replacement for the released incremental model/decoder or their defaults.
+Select it only with a separately trained, contract-bound absolute-goal checkpoint.
+Its kwargs are `action_contract` (local JSON path), `closed_opening_m`,
+`open_opening_m`, and the existing optional `side`, `execute_steps` and
+`gripper_action_curve`. The observation encoder is unchanged (state8 by default;
+state10 still needs its separate checkpoint contract).
+
+The JSON schema is `tacpilot.absolute-cartesian-goals.v1`, with finite
+`position_anchor_m` (three metres), positive scalar `position_scale_m`, unit
+`reference_xyzw`, `rotation_scale_rad` equal to pi, and positive
+`maximum_translation_step_m` / `maximum_rotation_step_rad`. Boolean numbers are
+rejected. Step caps cannot exceed the legacy physical scales, 0.02m / 0.1rad;
+these ceilings are not task-specific safety certification. The upright candidate
+must use its exact trained contract bytes and the tighter **0.002m / 0.015rad**
+caps, not merely any schema-compatible file.
+
+After explicit [-1,1] saturation, each row means
+`p_goal = position_anchor_m + xyz * position_scale_m` and
+`R_goal = R_reference @ Rotation.from_rotvec(rotvec * pi)`. Thus encoded rotation
+is `rotvec(R_reference.T @ R_goal) / pi`, not a world-frame incremental rotation.
+Each returned target moves toward this absolute destination by at most the
+contract's translation norm / shortest-arc rotation caps. The first target starts
+from `target/side`; later targets use the previous bounded target within that
+chunk. A new decode re-anchors from the dispatched stream, with no hidden
+integration across predictions. Repeated identical goals converge without drift.
+Gripper sign, calibrated endpoints and optional nonlinear curve are identical to
+`UprightActions`; no object truth or task phase is read. Both sides are supported.
+
+Decoder metadata publishes `action_contract_sha256` over the **exact JSON bytes**.
+`TacPilotACT` publishes the same optional field when its checkpoint directory
+contains `action-contract.json`, retaining the ordinary file hashes and without
+interpreting action semantics. `ModelPolicy` unwraps HTTP `model` metadata and,
+if either predictor or decoder publishes a contract fingerprint, requires both
+valid SHA256 fingerprints to match before robot startup; mismatch triggers normal
+component cleanup. Neither publishing a fingerprint preserves legacy behavior.
+Even whitespace changes require a matching checkpoint/decoder file identity.
+
+The Cartesian executor independently clips/holds against actual dispatched FK;
+decoder bounds do not replace that governor, joint/velocity limits, watchdogs,
+calibration checks or operator authorization. No physical readiness or learned
+waiting/task success is implied. Offline regression command:
+
+```sh
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_absolute_goal_adapters.py' -v
+```
+
 ## Fixed preparation and automatic handoff
 
 The upright example uses 3-degree joint arrival at the intermediate swing/elbow

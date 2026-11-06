@@ -40,15 +40,31 @@ class ModelPolicy:
                 obj = component(spec)
                 self.components.append(obj)
                 obj.reset(context)
-            model, encoder, _ = self.components
+            model, encoder, decoder = self.components
             model_meta = getattr(model, 'metadata', {})
+            if not isinstance(model_meta, dict):
+                raise ValueError('Invalid model metadata')
             model_meta = model_meta.get('model', model_meta)
+            if not isinstance(model_meta, dict):
+                raise ValueError('Invalid wrapped model metadata')
             width = model_meta.get('state_width')
             encoded_width = getattr(encoder, 'metadata', {}).get('state_width')
             if encoded_width == 10 and width is None:
                 raise ValueError('Execution-aware encoder requires a checkpoint publishing its state width')
             if width is not None and encoded_width is not None and width != encoded_width:
                 raise ValueError('Checkpoint and observation encoder state widths differ')
+            decoder_meta = getattr(decoder, 'metadata', {})
+            if not isinstance(decoder_meta, dict):
+                raise ValueError('Invalid action decoder metadata')
+            key = 'action_contract_sha256'
+            if key in model_meta or key in decoder_meta:
+                for meta in (model_meta, decoder_meta):
+                    digest = meta.get(key)
+                    if (not isinstance(digest, str) or len(digest) != 64
+                            or any(c not in '0123456789abcdef' for c in digest)):
+                        raise ValueError('Both model and decoder must publish valid action_contract_sha256')
+                if model_meta[key] != decoder_meta[key]:
+                    raise ValueError('Checkpoint and action decoder contract SHA256 differ')
         except BaseException:
             self.close()
             raise
