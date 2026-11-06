@@ -325,6 +325,24 @@ class CartesianDispatchTests(unittest.TestCase):
         self.assertFalse(self.plant.commands)
         self.robot.close()
 
+    def test_progress_holds_reference_and_anchors_inference_to_realized_fk(self):
+        from openarm_policy.cartesian import CartesianRobot
+        with self.assertRaises(ValueError):
+            CartesianRobot(self.plant, dict(self.config, progress={}, tracking_limit_rad=.06))
+        robot = CartesianRobot(self.plant, dict(self.config, progress={}))
+        robot.start()
+        robot.reference[0] = .08  # plant has not caught up
+        robot.target = self.np.array([.5, 0, 0, 0, 0, 0, 1, 0])
+        robot.submit((.5, 0, 0, 0, 0, 0, 1, 0), time.monotonic()+1)
+        self.solver.step.assert_not_called()
+        self.assertAlmostEqual(self.plant.commands[-1][1][0], .08)
+        self.assertAlmostEqual(robot.snapshot()["target/left"].data[0], 0.)
+        self.assertIn("execution/left", robot.snapshot())
+        # SimulatedRobot now reports the held reference, permitting resume.
+        robot.submit((.5, 0, 0, 0, 0, 0, 1, 0), time.monotonic()+1)
+        self.assertAlmostEqual(self.solver.step.call_args.args[1][0, 3], .002)
+        robot.close()
+
     def test_requires_verified_calibration_and_one_arm(self):
         from openarm_policy.cartesian import CartesianRobot
         from openarm_policy.robots import SimulatedRobot

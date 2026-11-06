@@ -51,7 +51,7 @@ class CartesianRobot:
         from openarm_runtime.cartesian import KinematicChain, pose
         allowed = {"side", "calibration_verified", "chain", "task_from_base", "workspace_m",
                    "gripper", "velocity_rad_s", "gripper_velocity_rad_s", "tracking_limit_rad",
-                    "feedback_max_age_s", "calibration_status"}
+                     "feedback_max_age_s", "calibration_status", "progress"}
         verified = config.get("calibration_verified") is True
         nominal = (config.get("calibration_verified") is False
                    and config.get("calibration_status") == "nominal_model_not_hardware_calibrated")
@@ -96,6 +96,14 @@ class CartesianRobot:
         self.last_submit = None
         self.dispatch_sequence = 0
         self.preparing = False
+        self.progress = None
+        if config.get("progress") is not None:
+            from .progress import CartesianProgress
+            self.progress = CartesianProgress(**config["progress"])
+            if self.progress.pause_error + self.speed*self.period >= self.tracking:
+                raise ValueError("Progress pause must leave one joint step below the hard tracking limit")
+            self.streams += (StreamSpec(f"execution/{self.side}", "waiting_joint_error", (2,),
+                                        "bool,rad", "motor", self.max_age),)
 
     def begin_preparation(self):
         if self.reference is None or self.preparing:
@@ -177,6 +185,8 @@ class CartesianRobot:
     def start(self):
         import numpy as np
         from openarm_runtime.cartesian import DifferentialIK
+        if self.progress is not None:
+            self.progress.waiting_since = None
         self.robot.start()
         try:
             _, measured = self._feedback(self.robot.snapshot())
@@ -197,7 +207,11 @@ class CartesianRobot:
         samples[f"tcp/{self.side}"] = SensorSample(sample.sequence, sample.received_at,
                                                    tuple(float(v) for v in self._tcp(measured)))
         samples[f"target/{self.side}"] = SensorSample(sample.sequence + self.dispatch_sequence, sample.received_at,
-                                                      tuple(float(v) for v in self.target))
+                                                      tuple(float(v) for v in (
+                                                          self._tcp(self.reference) if self.progress else self.target)))
+        if self.progress is not None:
+            samples[f"execution/{self.side}"] = SensorSample(sample.sequence, sample.received_at,
+                (float(self.progress.waiting_since is not None), float(max(abs(self.reference[:7]-measured[:7])))))
         return samples
 
     def submit(self, values, valid_until):
@@ -214,8 +228,19 @@ class CartesianRobot:
         _, measured = self._feedback(self.robot.snapshot())
         if max(abs(self.reference[:7] - measured[:7])) > self.tracking:
             raise RuntimeError("Cartesian tracking lead exceeded")
+        if self.progress is not None and not self.progress.advance(self.reference[:7], measured[:7], now):
+            # Hold the existing joint reference: no new IK integration and no
+            # target accumulation while feedback catches up. Watchdogs remain live.
+            self.robot.submit(tuple(float(v) for v in self.reference), valid_until)
+            self.last_submit = now
+            self.record({"event": "cartesian_progress_wait", "time": now,
+                         "joint_targets": self.reference.tolist(),
+                         "measured_task_tcp": self._tcp(measured).tolist()})
+            return
+        governed = (self.progress.target(self._tcp(self.reference), values)
+                    if self.progress is not None else values)
         target = np.eye(4)
-        target[:3, 3], target[:3, :3] = values[:3], Rotation.from_quat(values[3:7]).as_matrix()
+        target[:3, 3], target[:3, :3] = governed[:3], Rotation.from_quat(governed[3:7]).as_matrix()
         target_base = self.base_from_task @ target
         # Persistent bounded reference avoids stalling against static friction;
         # independently bound reference-versus-measured error before AND after IK.
@@ -234,7 +259,7 @@ class CartesianRobot:
         self.last_submit = now
         self.dispatch_sequence += 1
         self.record({"event": "cartesian_dispatch", "time": time.monotonic(),
-                     "requested_task_tcp": list(values), "joint_targets": sent,
+                     "requested_task_tcp": list(values), "governed_task_tcp": list(governed), "joint_targets": sent,
                      "measured_task_tcp": self._tcp(measured).tolist(),
                      "commanded_task_tcp": realized.tolist(), "ik": solved})
 

@@ -181,6 +181,32 @@ protective stops remain failures in autonomous evaluation. Logs do not implement
 an automatic real-object success judge. No hardware task performance is claimed
 by model-load or offline regressions.
 
+## Optional execution-aware progression
+
+The `cartesian.progress` object enables an opt-in executor governor. See
+`examples/upright-progress.example.json` for candidate settings; the existing
+physical launcher is not changed by installing the code. Requested TCP goals are
+limited relative to FK of the persistent dispatched joint reference, with separate
+translation/rotation step bounds. In this mode `target/side` advertises that
+realizable commanded FK, not the farther requested goal, so later inference
+chunks do not anchor to accumulated, unexecuted targets.
+
+When reference-versus-measured joint error reaches the soft pause threshold, the
+executor holds the existing joint reference and does not integrate new IK steps.
+It resumes below the separate hysteresis threshold or aborts on the bounded pause
+timeout. The ordinary hard tracking bound, freshness checks and watchdogs remain
+active. Holding the reference rather than resetting it each tick avoids making
+static friction consume every velocity-limited step. Requested, governed,
+commanded and measured TCP poses remain separately recorded.
+
+`execution/side` records `[waiting, maximum_joint_error_rad]`; the legacy state8
+ACT adapter does **not** consume these extra fields. This is executor feedback,
+not evidence that the old model has learned to wait. New demonstrations and a
+compatible encoder/model must cover waiting/recovery if those semantics are to
+be learned explicitly. A new prediction still uses current images and measured
+TCP state during a hold. Shorter receding-horizon chunks and training with the
+same bounds are separate development experiments, not changes to frozen results.
+
 ## Fixed preparation and automatic handoff
 
 The upright example uses 3-degree joint arrival at the intermediate swing/elbow
