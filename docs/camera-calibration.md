@@ -2,6 +2,37 @@
 
 ## Unified web workflow (head camera only)
 
+### Capture workspace
+
+The page is organized around a live image and the next available action, not a
+list of internal APIs. Initially it shows **开始标定** and the confirmed board
+summary; **棋盘与相机设置** and shooting tips are collapsed. **查看画面** previews
+without creating evidence. Explicitly starting calibration also connects the
+existing preview and reveals **拍摄一张**, photo-purpose selection and counts.
+Opening the page still starts neither hardware nor evidence collection.
+
+Each action has its own inline live-region feedback. Capture immediately shows
+loading, disables repeated clicks, and reports either the accepted corner count
+or why that photo was not collected and how to retry. Errors never depend on a
+banner above the viewport. Preview errors have a reconnect action beside the
+image. An unstarted or foreign-owned session has no capture control.
+
+**标定照片** means fit images; **检查照片** means predeclared held-out validation.
+The two counters show the unchanged minima of 8 and 3. After 8 fit images, the
+page offers **下一步：拍检查照片** without silently changing photo purpose.
+**计算标定结果** enables only after both counts qualify, and reports errors at
+that button. Counts are not physical acceptance. Results and save confirmation
+appear only once an estimate exists. Saving remains an explicit, unverified
+candidate operation; there is no automatic installation.
+
+Settings lock during a live session with an explanation. A second window says
+to return to the original rather than displaying editable-looking blank fields.
+After the owner's heartbeat expires (120 seconds), status reads from another
+window also release the expired lease; they never take ownership. Ending a
+session requires confirmation, keeps evidence, and does not stop hardware.
+Offline external-pose import and provenance details live under **高级**, outside
+the normal intrinsic-calibration flow. The original extrinsics restrictions apply.
+
 The platform now includes **头部相机标定** at `/#camera_calibration`, or
 `/camera-calibration` on the same server. Install `.[platform,calibration]`.
 Opening the page does not open a camera, acquire CAN, select a controller or

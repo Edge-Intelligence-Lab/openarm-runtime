@@ -147,6 +147,11 @@ class CalibrationWorkspace:
 
     def status(self, owner):
         with self.lock:
+            # A departed owner's browser can no longer heartbeat. Other windows
+            # must observe lease expiry too, without acquiring that ownership.
+            if self.state in ('collecting', 'estimated') and self.clock()-self.last_touch > 120:
+                self.epoch += 1
+                self.state = 'cancelled'
             if owner == self.owner and self.state in ('collecting', 'estimated'):
                 try:
                     self._owner(owner)

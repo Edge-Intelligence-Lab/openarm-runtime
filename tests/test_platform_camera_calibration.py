@@ -268,13 +268,21 @@ import openarm_platform.camera_calibration_view
 
 @unittest.skipUnless(PLATFORM,'platform extra')
 class CalibrationViewTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from nicegui import Client, ui
+        self.client = Client(ui.page('/calibration-ui-tests'))
+
+    async def asyncTearDown(self):
+        self.client.delete()
+        await asyncio.sleep(0)
+
     async def test_ui_renders_passively_and_navigation_available_in_attach_only(self):
         from nicegui import ui
         from openarm_platform.camera_calibration_view import build_camera_calibration_view
         with tempfile.TemporaryDirectory() as root:
             work=CalibrationWorkspace(Path(root)/'not-created',5003)
             with patch('cv2.VideoCapture',side_effect=AssertionError('hardware')) if AVAILABLE else patch('socket.socket'):
-                with ui.column():
+                with self.client, ui.column():
                     view=build_camera_calibration_view(work)
                     await view.refresh()
                 self.assertEqual(work.state,'idle')
@@ -294,7 +302,7 @@ class CalibrationViewTests(unittest.IsolatedAsyncioTestCase):
                 view.board_type.value='charuco'
                 view.board_fields()
                 self.assertTrue(view.marker.visible)
-                self.assertTrue(view.import_upload.enabled)
+                self.assertFalse(view.import_upload.enabled)  # No session yet.
         from starlette.testclient import TestClient
         from openarm_platform.app import create_app
         manager=Mock();manager.status.return_value={}
@@ -302,3 +310,130 @@ class CalibrationViewTests(unittest.IsolatedAsyncioTestCase):
             result=client.post('/api/select',json={'id':'camera_calibration'},headers={'Origin':'http://127.0.0.1:8888'})
             self.assertTrue(result.json()['services']['camera_calibration']['reachable'])
             manager.start.assert_not_called();manager.activate.assert_not_called()
+
+    async def test_capture_first_workflow_and_save_gates(self):
+        from nicegui import ui
+        from openarm_platform.camera_calibration_view import build_camera_calibration_view
+        with tempfile.TemporaryDirectory() as root:
+            packet=frame()
+            sequence=[0]
+            def fetch(*args):
+                sequence[0]+=1
+                return packet[0],dict(packet[1],sequence=sequence[0])
+            work=CalibrationWorkspace(root,5003,fetch=fetch)
+            with self.client, ui.column():view=build_camera_calibration_view(work)
+            await view.refresh()
+            self.assertTrue(view.start_button.enabled)
+            self.assertFalse(view.capture_panel.visible)
+            self.assertFalse(view.capture_button.enabled)
+            self.assertFalse(view.solve_button.enabled)
+            self.assertFalse(view.result_panel.visible)
+            await view.start()
+            self.assertEqual(work.state,'collecting')
+            self.assertTrue(view.previewing)
+            self.assertTrue(view.capture_panel.visible)
+            self.assertFalse(view.start_button.visible)
+            self.assertFalse(view.nx.enabled)
+            self.assertTrue(view.capture_button.enabled)
+            detection=dict(corner_ids=list(range(54)),center_normalized=[.5,.5],
+                           coverage_fraction=.3,sharpness=100,objects=[],pixels=[])
+            with patch('openarm_runtime.camera_intrinsics.detect',return_value=detection):
+                for _ in range(8):await view.capture()
+                self.assertTrue(view.phase_button.visible)
+                self.assertFalse(view.solve_button.enabled)
+                self.assertIn('54',view.messages['capture'].text)
+                await view.next_phase()
+                self.assertEqual(view.role.value,'validation')
+                for _ in range(3):await view.capture()
+            self.assertTrue(view.solve_button.enabled)
+            self.assertEqual(view.fit_count.text,'8 / 8')
+            self.assertEqual(view.validation_count.text,'3 / 3')
+            self.assertEqual(len(view.samples.rows),11)
+            work.result=dict(fit_rms_px=.2,validation_rms_px=.3,quality_issues=['边缘覆盖不足'])
+            work.state='estimated'
+            await view.refresh()
+            self.assertTrue(view.result_panel.visible)
+            self.assertIn('边缘覆盖不足',view.quality_label.text)
+            self.assertFalse(view.save_button.enabled)
+            view.confirm.value=True
+            await view.confirm_changed()
+            self.assertTrue(view.save_button.enabled)
+            await view.save()
+            self.assertEqual(work.state,'saved')
+            self.assertFalse(view.save_button.enabled)
+            self.assertIn('未',view.messages['save'].text)
+            self.assertTrue((Path(root)/work.session_id/'candidate.json').exists())
+
+    async def test_local_errors_busy_feedback_and_preview_recovery(self):
+        import threading
+        from nicegui import ui
+        from openarm_platform.camera_calibration_view import build_camera_calibration_view
+        with tempfile.TemporaryDirectory() as root:
+            work=CalibrationWorkspace(root,5003,fetch=lambda *a:frame())
+            with self.client, ui.column():view=build_camera_calibration_view(work)
+            await view.capture()  # Stale/event injection still gets local feedback.
+            self.assertIn('开始标定',view.messages['capture'].text)
+            self.assertEqual(view.messages['start'].text,'')
+            await view.start()
+            entered,release=threading.Event(),threading.Event()
+            def fail(*args):
+                entered.set()
+                release.wait(5)
+                raise ValueError('未检测到完整 9×6 内角点')
+            with patch.object(work,'capture',side_effect=fail):
+                task=asyncio.create_task(view.capture())
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait,3))
+                    self.assertIn('检测',view.messages['capture'].text)
+                    self.assertFalse(view.capture_button.enabled)
+                    self.assertFalse(view.role.enabled)
+                    self.assertIn('loading',view.capture_button.props)
+                    await view.capture()  # Double click does not dispatch a second worker.
+                    self.assertEqual(work.capture.call_count,1)
+                finally:
+                    release.set()
+                    await task
+            self.assertIn('这张未收录',view.messages['capture'].text)
+            self.assertIn('再拍一张',view.messages['capture'].text)
+            self.assertTrue(view.capture_button.enabled)
+            self.assertEqual(len(work.samples),0)
+            with patch.object(work,'capture',side_effect=OSError('Connection refused')):
+                await view.capture()
+            self.assertIn('重连画面',view.messages['capture'].text)
+            self.assertNotIn('Connection refused',view.messages['capture'].text)
+            self.assertIn('Connection refused',view.diagnostic.text)
+            view.preview_failed()
+            self.assertFalse(view.previewing)
+            self.assertNotIn('src',view.image.props)
+            self.assertIn('重连',view.preview_button.text)
+            await view.toggle_preview()
+            self.assertTrue(view.previewing)
+            view.preview_loaded()
+            self.assertEqual(view.messages['preview'].text,'')
+            await view.cancel()
+            self.assertEqual(work.state,'cancelled')
+            self.assertTrue(view.start_button.enabled)
+            self.assertFalse(view.capture_panel.visible)
+
+    async def test_other_window_never_sees_evidence_or_acquires_owner_and_expired_lease_releases(self):
+        from nicegui import ui
+        from openarm_platform.camera_calibration_view import build_camera_calibration_view
+        with tempfile.TemporaryDirectory() as root:
+            now=[10.]
+            work=CalibrationWorkspace(root,5003,clock=lambda:now[0])
+            work.start('other-window','head',SPEC)
+            with self.client, ui.column():view=build_camera_calibration_view(work)
+            await view.refresh()
+            self.assertFalse(view.start_button.enabled)
+            self.assertFalse(view.capture_panel.visible)
+            self.assertIn('原窗口',view.next_hint.text)
+            self.assertEqual(view.samples.rows,[])
+            self.assertFalse(view.import_upload.enabled)
+            self.assertFalse(view.board_summary.visible)
+            self.assertFalse(view.settings.visible)
+            self.assertEqual(work.owner,'other-window')
+            now[0]=131.
+            await view.refresh()
+            self.assertEqual(work.state,'cancelled')
+            self.assertTrue(view.start_button.enabled)
+            self.assertEqual(work.owner,'other-window')
