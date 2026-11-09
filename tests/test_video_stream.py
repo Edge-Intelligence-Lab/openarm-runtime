@@ -126,6 +126,42 @@ class VideoStreamTests(unittest.TestCase):
         self.assertEqual(self.decode(response).shape, (1, 2, 3))
         self.assertEqual(self.capture.frames["head"].image.shape, (2, 4, 3))
 
+    def test_mjpeg_reuses_capture_skips_duplicates_and_stops_on_failure(self):
+        import cv2
+        self.capture.configs = (FakeConfig('head',preview_width=2,preview_height=1),)
+        client=create_app(self.capture).test_client()
+        ticks=[]
+        def advance(_delay):
+            ticks.append(1)
+            if len(ticks)==2:
+                self.capture.frames['head']=FakeFrame(self.capture.frames['head'].image,time.monotonic(),sequence=8)
+            elif len(ticks)==3:
+                self.capture.errors['head']='disconnected'
+        with patch('openarm_video.stream.time.sleep',side_effect=advance), \
+             patch('openarm_video.stream.encode_frame',wraps=encode_frame) as encoded:
+            response=client.get('/stream/head.mjpg',buffered=False)
+            self.assertEqual(response.mimetype,'multipart/x-mixed-replace')
+            self.assertEqual(response.headers['X-Accel-Buffering'],'no')
+            stream=iter(response.response)
+            first,second=next(stream),next(stream)
+            self.assertIn(b'X-Frame-Sequence: 7\r\n',first)
+            self.assertIn(b'X-Frame-Sequence: 8\r\n',second)
+            jpeg=first.split(b'\r\n\r\n',1)[1][:-2]
+            image=cv2.imdecode(self.np.frombuffer(jpeg,self.np.uint8),cv2.IMREAD_COLOR)
+            self.assertEqual(image.shape,(1,2,3))
+            with self.assertRaises(StopIteration):next(stream)
+            response.close()
+            self.assertEqual(encoded.call_count,2)
+        self.assertEqual(self.capture.frames['head'].image.shape,(2,4,3))
+        self.capture.start.assert_not_called()
+        self.capture.close.assert_not_called()
+
+    def test_mjpeg_unknown_depth_and_stale_sources_are_rejected(self):
+        for path in ['/stream/missing.mjpg','/stream/range_sensor.mjpg']:
+            self.assertEqual(self.client.get(path).status_code,404)
+        self.capture.errors['head']='unplugged'
+        self.assertEqual(self.client.get('/stream/head.mjpg').status_code,503)
+
     def test_raw_depth_png_preserves_uint16_values(self):
         response = self.client.get("/depth/range_sensor.png?raw=1")
         self.assertEqual(response.status_code, 200)

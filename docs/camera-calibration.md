@@ -40,7 +40,13 @@ verified hardware identity. A changed capture generation, resolution, nominal
 capture mode or identity is rejected inside a session. The capture backend does
 not currently measure focus, crop or exposure settings; freeze those physically.
 
-The borrowed endpoint is `/apps/vision/calibration/frame/head.png` (replace
+The live preview uses `/apps/vision/stream/head.mjpg`: one multipart JPEG
+connection, up to 30 fps subject to actual capture/network speed. It borrows the
+existing reader, skips duplicate frames, and drops intervening frames for slow
+clients rather than queuing them. Pausing removes the image source and closes the
+preview connection, not the camera owner. It is not calibration evidence.
+
+The separate sampling endpoint is `/apps/vision/calibration/frame/head.png` (replace
 `head` with the configured camera ID). The video owner encodes one existing
 snapshot as lossless PNG at its actual capture resolution, with atomic metadata
 in `X-Calibration-Metadata`. It does not reopen the device or use the resized

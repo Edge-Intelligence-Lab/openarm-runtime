@@ -125,6 +125,44 @@ def create_app(capture):
                        depth=depths.get(depth_names[0], {}) if depth_names else {},
                        simulation=bool(getattr(capture, "simulate", False)))
 
+    def preview_frame(frame, config):
+        if config.preview_width is not None and config.preview_height is not None:
+            cv2, _ = _dependencies()
+            image = cv2.resize(frame.image, (config.preview_width, config.preview_height))
+            return replace(frame, image=image)
+        return frame
+
+    @app.get('/stream/<name>.mjpg')
+    def rgb_stream(name):
+        config = configs.get(name)
+        if config is None or config.kind != 'rgb':
+            return jsonify(error='RGB camera not found'), 404
+        if current(name) is None:
+            return jsonify(error='No fresh camera frame'), 503
+
+        def frames():
+            previous = None
+            period = 1 / min(config.fps, 30)
+            while True:
+                started = time.monotonic()
+                frame = current(name)
+                if frame is None:
+                    return  # Never retransmit an old image after capture fails.
+                identity = (getattr(frame, 'source_id', ''), frame.sequence)
+                if identity != previous:
+                    data, _ = encode_frame(preview_frame(frame, config))
+                    previous = identity
+                    yield (b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: '
+                        + str(len(data)).encode('ascii')
+                        + b'\r\nX-Frame-Sequence: ' + str(frame.sequence).encode('ascii')
+                        + b'\r\n\r\n' + data + b'\r\n')
+                # Latest-frame only: slow clients drop intervening frames,
+                # rather than build a queue or open a second camera handle.
+                time.sleep(max(0, period - (time.monotonic() - started)))
+
+        return Response(frames(), content_type='multipart/x-mixed-replace; boundary=frame',
+            headers={'Cache-Control':'no-store', 'X-Accel-Buffering':'no'})
+
     def picture(name, *, depth=False):
         config = configs.get(name)
         if config is None or (config.kind == "depth") != depth:
@@ -139,10 +177,8 @@ def create_app(capture):
         frame = current(name)
         if frame is None:
             return jsonify(error="No fresh camera frame"), 503
-        if not depth and config.preview_width is not None and config.preview_height is not None:
-            cv2, _ = _dependencies()
-            image = cv2.resize(frame.image, (config.preview_width, config.preview_height))
-            frame = replace(frame, image=image)
+        if not depth:
+            frame = preview_frame(frame, config)
         data, mime = encode_frame(frame, raw=raw, near=near, far=far)
         headers = {"Cache-Control": "no-store", "X-Frame-Sequence": str(frame.sequence),
                    "X-Frame-Age-Ms": str(round((time.monotonic() - frame.received_at) * 1000))}

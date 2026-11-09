@@ -39,11 +39,14 @@ class CalibrationView:
                 self.dictionary_label = ui.label('ChArUco 打印板字典（必须与实际打印板一致）')
                 self.dictionary = ui.radio(['DICT_4X4_50','DICT_5X5_100','DICT_6X6_250']).props('inline data-testid=calibration-dictionary')
                 ui.button('开始新会话并保存采集证据', on_click=self.start).props('data-testid=calibration-start')
-                ui.button('开启/暂停只读原尺寸预览', on_click=self.toggle_preview).props('outline data-testid=calibration-preview-toggle')
-                self.image = ui.image('').classes('w-full').style('height:320px').props('fit=contain data-testid=calibration-image')
+                ui.button('开启/暂停实时视频预览', on_click=self.toggle_preview).props('outline data-testid=calibration-preview-toggle')
+                # A plain <img> consumes multipart MJPEG directly. An image
+                # widget/preloader may wait for the never-ending response.
+                self.image = ui.element('img').classes('w-full').style('height:320px;object-fit:contain').props('alt="头部相机实时预览" data-testid=calibration-image')
                 self.image.set_visibility(False)
-                self.image.on('error', lambda: self.error.set_text('原尺寸预览不可用：检查已有视频服务、相机 ID 和 calibration_identity；本页不会启动服务'))
-                ui.label('预览仅缩放显示；求解使用无损原始像素。预览不代表曝光同步或设备安全状态。').classes('text-xs text-grey-7')
+                self.image.on('error', lambda: self.error.set_text('视频预览不可用或已断开：检查视频服务/相机 ID，关闭后重新开启预览；本页不会启动服务') if self.previewing else None)
+                self.camera.on_value_change(self.refresh_preview)
+                ui.label('预览使用连续 JPEG 视频流（最多30帧/秒，实际取决于相机和网络）；采集/求解仍使用独立的无损原尺寸 PNG，不从预览视频截帧。预览不代表曝光同步。').classes('text-xs text-grey-7')
             with ui.card().classes('calibration-card'):
                 ui.label('2 · 手持板内参采集与留出检查').classes('text-lg font-medium')
                 ui.label('手持板覆盖图像中心/边缘、不同距离和两个方向的倾角。先指定样本用途，留出图像永不拟合 K。至少 8 张拟合 + 3 张留出，不自动删除异常值。')
@@ -74,7 +77,6 @@ class CalibrationView:
                 self.confirm = ui.checkbox('我已检查结果；确认仅保存未独立验证候选，不安装或激活')
                 ui.button('确认保存不可变候选', on_click=self.save).props('data-testid=calibration-save')
                 ui.label('证据目录由可信外部平台配置 calibration_root 指定。所有原图、样本用途和来源保留；不覆盖旧候选。')
-        self.timer = ui.timer(2, self.refresh_preview, active=False)
         ui.timer(1, self.refresh)
         self.board_fields()
 
@@ -127,7 +129,8 @@ class CalibrationView:
         try:
             await asyncio.to_thread(self.workspace.cancel, self.owner)
             self.previewing = False
-            self.timer.deactivate()
+            self.image.set_visibility(False)
+            self.image.props(remove='src')
             await self.refresh()
         except ValueError as exc:
             self.error.set_text(str(exc))
@@ -151,15 +154,19 @@ class CalibrationView:
     async def toggle_preview(self):
         self.previewing = not self.previewing
         self.image.set_visibility(self.previewing)
-        self.timer.activate() if self.previewing else self.timer.deactivate()
         if self.previewing:
             await self.refresh_preview()
+        else:
+            self.image.props(remove='src')
 
     async def refresh_preview(self):
+        if not self.previewing:
+            return
         name = self.camera.value
         if isinstance(name, str) and re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]*', name):
-            self.image.set_source(f'/apps/vision/calibration/frame/{name}.png?t={time.monotonic_ns()}')
+            self.image.props(f'src=/apps/vision/stream/{name}.mjpg?subscription={time.monotonic_ns()}')
         else:
+            self.image.props(remove='src')
             self.error.set_text('无效相机 ID')
 
     async def refresh(self):
