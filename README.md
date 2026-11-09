@@ -31,6 +31,11 @@ feedforward to hold, teleoperation and policy control, with shadow diagnostics a
 per-machine configuration. Install the `gravity` extra; active physical validation
 is separate from the offline tests.
 
+Experimental [Cartesian FK and constrained IK](docs/cartesian.md) building blocks
+are available with the `cartesian` extra. A configured workstation can opt into
+virtual-leader Cartesian IK following; the real small-leader geometry is not
+modeled, and the legacy joint-space mode remains available.
+
 `openarm_policy` connects model adapters to timestamped robot/video/tactile
 observations and single-step or chunked joint actions. Inference runs in a separate
 process; Classic CAN control retains independent workers, deadlines and disable

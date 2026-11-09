@@ -385,6 +385,21 @@ wheels = [
 ]
 
 [[package]]
+name = "daqp"
+version = "0.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c2/5d/6ae925a74c02e68a1356a49261dc42af98fa1cda75c16428e49cb7b1f0f9/daqp-0.11.0.tar.gz", hash = "sha256:2f27baf18d2acca14186498e651b34e0bed455627e777d3fd8ba655e7e40f920", size = 86350, upload-time = "2026-11-02T21:26:36.889Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/9a/d6b2ba0197ba18d04035f76b2d62cb2d43e69b23b71a12af12325c151d35/daqp-0.11.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:90b55cfeab31d9f2e2170bb6a0fd2901874414f4afd0a9bef7b077f1708b0b86", size = 249831, upload-time = "2026-11-02T21:37:11.684Z" },
+    { url = "https://files.pythonhosted.org/packages/df/13/4c58562a43fcf9895cf9001f6f42518940e85a16c633d039e3eb55b0c1f0/daqp-0.11.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:962b546fd9c25e75fcbf41272ca450c8e13340f488be2be87a39d76c3db16752", size = 230348, upload-time = "2026-11-02T21:37:12.655Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/6e/e1a55e10ddfa5d7416c45e5be90be49ac609fd561e1165674922a37e2905/daqp-0.11.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3a094f03f2a09247873a30f7d8df8b4be9e361709749e21912b3b339a2634d9e", size = 1097292, upload-time = "2026-11-02T21:35:21.067Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/5e/7f9cfe07da9c938043741a1210d787e74d913f58880de89669c57b47cc7c/daqp-0.11.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c8fdb79f68394138ef659caa4240e8439a4d6524742cdb900c18b64961e9c764", size = 1151914, upload-time = "2026-11-02T21:26:29.117Z" },
+    { url = "https://files.pythonhosted.org/packages/78/c1/8133677c1458c4a5f916c8745b1d5bc96b3c74017bd3755cd718a4b8ba7c/daqp-0.11.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:c349d6415fc854cb2e76759c90b90a664fe3cee59b3b40e99e4a489c20e9abaf", size = 1081313, upload-time = "2026-11-02T21:35:22.083Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/95/c9f0cfd1edc0388fca51ce29f7a91183528940b5b98867e03d4595454a35/daqp-0.11.0-cp312-cp312-win32.whl", hash = "sha256:550b16e022cd1e9a7ba26cdc410f26b67530427882b3144567f30e738d17a203", size = 164336, upload-time = "2026-11-02T21:34:27.297Z" },
+    { url = "https://files.pythonhosted.org/packages/37/e6/9fe841f3fa3415f47dc7f16a59d2211aead4b6d98015d0df8a3233d3404d/daqp-0.11.0-cp312-cp312-win_amd64.whl", hash = "sha256:8ffd54badb56c0e80de3086e6a56b1d90593233abb8e886860b26fa6afaa4fb3", size = 201710, upload-time = "2026-11-02T21:34:28.19Z" },
+]
+
+[[package]]
 name = "docutils"
 version = "0.23"
 source = { registry = "https://pypi.org/simple" }
@@ -666,6 +681,15 @@ wheels = [
 ]
 
 [[package]]
+name = "loop-rate-limiters"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/dc/ebbe468e7a71073879b322968a02e37594343ca2cc4b3ba65baf4db60adb/loop_rate_limiters-1.2.0.tar.gz", hash = "sha256:7187ec1f76f282ee7166d85c8e29eb13dd850422577decaf7e6bfc803173b421", size = 35581, upload-time = "2025-08-13T12:46:29.235Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e2/6d/d56be57340baf2e6f6361386f4c21b8b5e001251c64af954787f8d01ec78/loop_rate_limiters-1.2.0-py3-none-any.whl", hash = "sha256:482f720f409e05dfca8b7b63df180217afa9a51564def681853cb7370a020b74", size = 10917, upload-time = "2025-08-13T12:46:26.7Z" },
+]
+
+[[package]]
 name = "lxml"
 version = "6.1.3"
 source = { registry = "https://pypi.org/simple" }
@@ -912,6 +936,11 @@ version = "0.8.1"
 source = { editable = "." }
 
 [package.optional-dependencies]
+cartesian = [
+    { name = "daqp" },
+    { name = "pin" },
+    { name = "pin-pink" },
+]
 follower = [
     { name = "nanobind" },
     { name = "openarm-can" },
@@ -945,6 +974,7 @@ viewer = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", marker = "extra == 'platform'", specifier = "==3.14.5" },
+    { name = "daqp", marker = "extra == 'cartesian'", specifier = "==0.11.0" },
     { name = "feetech-servo-sdk", marker = "extra == 'leader'", specifier = "==1.0.0" },
     { name = "flask", marker = "extra == 'video'", specifier = "==3.1.3" },
     { name = "nanobind", marker = "extra == 'follower'", specifier = "==2.10.2" },
@@ -953,14 +983,16 @@ requires-dist = [
     { name = "openarm-can", marker = "extra == 'follower'", git = "https://github.com/enactic/openarm_can.git?subdirectory=python&rev=bfd4e52194aefe38389fa6e670be3738136facb9" },
     { name = "opencv-python-headless", marker = "extra == 'video'", specifier = "==4.13.0.92" },
     { name = "paxini-sdk", marker = "extra == 'tactile'", git = "https://github.com/Jingyi-Z/paxini-sdk.git?rev=79c82145f88e158dd7706736e8c07f14f11cbd7a" },
+    { name = "pin", marker = "extra == 'cartesian'", specifier = "==4.1.0" },
     { name = "pin", marker = "extra == 'gravity'", specifier = "==4.1.0" },
+    { name = "pin-pink", marker = "extra == 'cartesian'", specifier = "==4.4.0" },
     { name = "pycollada", marker = "extra == 'viewer'", specifier = "==0.9.3" },
     { name = "pyserial", marker = "extra == 'leader'", specifier = "==3.5" },
     { name = "pyserial", marker = "extra == 'tactile'", specifier = "==3.5" },
     { name = "scikit-build-core", marker = "extra == 'follower'", specifier = "==1.1.1" },
     { name = "viser", extras = ["urdf"], marker = "extra == 'viewer'", specifier = "==1.1.1" },
 ]
-provides-extras = ["gravity", "platform", "leader", "viewer", "tactile", "video", "follower"]
+provides-extras = ["gravity", "cartesian", "platform", "leader", "viewer", "tactile", "video", "follower"]
 
 [[package]]
 name = "opencv-python-headless"
@@ -1075,6 +1107,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/cc/0ce868a405b5c449096d469091bb3e2aa8d756e1590ab1e8eaecbab9ce2b/pin-4.1.0-0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:1e8b476b7de8a6d709a48b272821c44ad8eeb3b1044d2cb702d19e0702be4b32", size = 7182697, upload-time = "2026-07-08T14:11:50.56Z" },
     { url = "https://files.pythonhosted.org/packages/07/00/3c5f98e11725d31b115385d43fd6656a49220d5268574405765999804709/pin-4.1.0-0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:2887713cf4cda0634f31987f17c9705518227388cfcb755513c1cc6c5e003d9e", size = 9722010, upload-time = "2026-07-08T14:11:52.192Z" },
     { url = "https://files.pythonhosted.org/packages/0b/2f/82315aba7d19b3251e1db1d5f6714065056c61831634b4841af42f87cfe0/pin-4.1.0-0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:5971393ade6d5f0577bb18e532b294a2d8ea1a7bd552d0bbc3b064368c8777ab", size = 9940525, upload-time = "2026-07-08T14:11:54.368Z" },
+]
+
+[[package]]
+name = "pin-pink"
+version = "4.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "loop-rate-limiters" },
+    { name = "numpy" },
+    { name = "pin" },
+    { name = "qpsolvers" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b7/5e/fdf043e8e74f0d16f30e4d02302f71d4121f06d3cc360516a13e5a4ad118/pin_pink-4.4.0.tar.gz", hash = "sha256:379d21556e5ac9833e495beb292158bdf83af0782eb5412638a12d1702985a9f", size = 53589, upload-time = "2026-09-09T21:21:54.758Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/c5/6a1b4f0ca5f11a97b1476e23afe8bc96a6afc4825d4981ebb9b2574b3bf4/pin_pink-4.4.0-py3-none-any.whl", hash = "sha256:d203a89ac987e7ced3aaf63f559a233f91edd8ac51d4ef9d07f924bca2654e9b", size = 65070, upload-time = "2026-09-09T21:21:52.883Z" },
 ]
 
 [[package]]
@@ -1256,6 +1304,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/74/93/7baea19427dcfbe1e5a372d81473250b379f04b1bd3c4c5ff825e2327202/pyyaml-6.0.3-cp312-cp312-win32.whl", hash = "sha256:96b533f0e99f6579b3d4d4995707cf36df9100d67e0c8303a0c55b27b5f99bc5", size = 137658, upload-time = "2025-09-25T21:32:20.209Z" },
     { url = "https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl", hash = "sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b", size = 154003, upload-time = "2025-09-25T21:32:21.167Z" },
     { url = "https://files.pythonhosted.org/packages/1a/08/67bd04656199bbb51dbed1439b7f27601dfb576fb864099c7ef0c3e55531/pyyaml-6.0.3-cp312-cp312-win_arm64.whl", hash = "sha256:64386e5e707d03a7e172c0701abfb7e10f0fb753ee1d773128192742712a98fd", size = 140344, upload-time = "2025-09-25T21:32:22.617Z" },
+]
+
+[[package]]
+name = "qpsolvers"
+version = "4.13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d1/aa/4d60a7065de30f07d7ead935eed364cf94fb0ad5607ddf1461f2bdf7ba17/qpsolvers-4.13.0.tar.gz", hash = "sha256:e86c4c16bf7c16fdbb8e6c0e4050bc1bfef72a25755211be66a492ac4c939a1c", size = 77317, upload-time = "2026-07-19T07:46:03.087Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2f/d0/f234961cb3ffbe381c3d82cd9c40fc7e67200c9f6b62a0f60235e74134b3/qpsolvers-4.13.0-py3-none-any.whl", hash = "sha256:7f23759a3d8835fa14b2c9eb4ba971188fde0c1460589f45897b00a75776eef7", size = 107113, upload-time = "2026-07-19T07:46:01.321Z" },
 ]
 
 [[package]]

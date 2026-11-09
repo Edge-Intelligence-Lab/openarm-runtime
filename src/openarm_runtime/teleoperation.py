@@ -66,7 +66,7 @@ def follower_targets(side, base, offsets):
 
 
 class Teleoperation:
-    def __init__(self, profile, mapping, readers, report_root, collection=None):
+    def __init__(self, profile, mapping, readers, report_root, collection=None, *, cartesian_factory=None):
         self.profile, self.mapping, self.readers = profile, mapping, readers
         self.report_root = Path(report_root)
         self.lock = threading.Lock()
@@ -81,18 +81,29 @@ class Teleoperation:
         self.takeover_generation = 0
         self.active_mapping = None
         self.active_readers = {}
+        self.cartesian_factory = cartesian_factory
+        self.cartesian = {}
+        self.mode = "joint"
 
     @property
     def busy(self):
         return self.lock.locked()
 
-    def start(self, owner, sides, *, home=False):
+    def start(self, owner, sides, *, home=False, mode="joint"):
         if (not self.profile.mapping_verified or not 1 <= len(sides) <= 2
                 or len(set(sides)) != len(sides) or any(s not in ("left", "right") for s in sides)):
             raise ValueError("请确认机械臂映射")
         if self.closed or not self.lock.acquire(blocking=False):
             raise RuntimeError("已有跟随任务")
         try:
+            if mode not in ("joint", "cartesian"):
+                raise ValueError("Unknown teleoperation mode")
+            if mode == "cartesian" and self.cartesian_factory is None:
+                raise ValueError("未配置 Cartesian IK 模型")
+            self.mode = mode
+            # Validate/load the optional model before opening or enabling motors.
+            self.cartesian = ({s: self.cartesian_factory(s) for s in sides}
+                              if mode == "cartesian" else {})
             mapping = copy.deepcopy(self.mapping)
             selected = {s: self.readers[mapping.data["ports"][s]] for s in sides}
             for side, reader in selected.items():
@@ -111,16 +122,20 @@ class Teleoperation:
                 with self.collection.lock:
                     # Preserve sensing streams, replace motion streams for selected arms.
                     self.collection.streams = {k: v for k, v in self.collection.streams.items()
-                                               if not k.startswith(("leader/", "intent/", "robot/"))}
+                                                if not k.startswith(("leader/", "intent/", "robot/", "cartesian/"))}
                     self.collection.context.update(dict(runtime_version=__version__, profile=asdict(self.profile),
                                                    mapping=copy.deepcopy(mapping.data), sides=list(sides),
-                                                   action_semantics="dispatched_joint_position_rad",
+                                                    action_semantics="dispatched_joint_position_rad",
+                                                    teleoperation_mode=self.mode,
+                                                    cartesian_models={s: c.metadata for s, c in self.cartesian.items()},
                                                    joint_order=[f"{s}/j{i}" for s in sides for i in range(1, 9)],
                                                    takeover={}, controller={}))
                 for side, reader in selected.items():
                     self.collection.register(f"leader/{side}", encoding="leader_registers", timestamp_semantics="read_started")
                     self.collection.register(f"intent/{side}", encoding="mapped_targets", timestamp_semantics="computed")
                     self.collection.register(f"robot/{side}", encoding="mit_exchange", timestamp_semantics="dispatch_started")
+                    if side in self.cartesian:
+                        self.collection.register(f"cartesian/{side}", encoding="tcp_intent_ik_feedback", timestamp_semantics="computed_before_dispatch")
                     reader.on_sample = lambda sample, count, s=side: self.collection.emit(
                         f"leader/{s}", sample.received_at, asdict(sample), count)
             self.owner = owner
@@ -185,7 +200,8 @@ class Teleoperation:
         try:
             report = AsyncReport(self.report_root / f"teleop-{uuid.uuid4().hex}.json",
                             {"action": "relative_teleoperation", "sides": list(readers),
-                             "mapping": mapping.data, "target_mode": "direct_mit",
+                              "mapping": mapping.data, "target_mode": "direct_mit",
+                              "teleoperation_mode": self.mode,
                              "joint_limits_deg": JOINT_LIMITS, "gripper_excursion_deg": 65})
             prepared = threading.Barrier(len(readers), timeout=10)
             ready = threading.Event()
@@ -226,6 +242,10 @@ class Teleoperation:
                         preflight = bus.preflight()
                         record(side, {"event": "preflight", "motors": preflight})
                         gravity = prepare_gravity(self.profile, side, bus, preflight)
+                        cartesian = self.cartesian.get(side)
+                        if cartesian:
+                            # Reject invalid motor/model initial angles before enable.
+                            cartesian.reset({mid: preflight[mid]["state"]["position"] for mid in range(1, 8)})
                         check_modes(bus, True, self.cancel.is_set)
                         # No arm enables until every selected bus passes preflight.
                         prepared.wait()
@@ -244,7 +264,8 @@ class Teleoperation:
                                 if self.home.phase == "following":
                                     origins.update({s: leader_sample(r) for s, r in readers.items()})
                                 ready.set()
-                                self.message = ("双臂" if len(readers) == 2 else "单臂") + ("跟随中 · 直接位置跟随" if self.home.phase == "following" else "准备回零")
+                                following = "末端 IK 跟随中 · 虚拟主臂" if self.mode == "cartesian" else "跟随中 · 直接位置跟随"
+                                self.message = ("双臂" if len(readers) == 2 else "单臂") + (following if self.home.phase == "following" else "准备回零")
                         previous = time.monotonic()
                         recorded = False
                         generation, home_epoch, completed_epoch = 0, 0, 0
@@ -261,12 +282,18 @@ class Teleoperation:
                                     generation = self.takeover_generation
                                     recorded = False
                                 if not recorded:
+                                    if cartesian:
+                                        cartesian.reset(control.base)
                                     record(side, {"event": "takeover", "leader_positions": origins[side].positions,
                                                   "follower_base": control.base})
                                     recorded = True
                                 sample = leader_sample(reader)
                                 offsets = relative_offsets(mapping, side, origins[side], sample)
                                 targets = follower_targets(side, control.base, offsets)
+                                if cartesian:
+                                    targets, tcp_event = cartesian.step(targets, control.states, period)
+                                    if self.collection:
+                                        self.collection.emit(f"cartesian/{side}", now, tcp_event)
                                 if self.collection:
                                     angles, opening = mapping.angles(side, sample.positions)
                                     self.collection.emit(f"intent/{side}", now, dict(
@@ -340,10 +367,19 @@ class Teleoperation:
 
 
 def attach(server, profile, mapping, readers, report_root, mapping_lock, calibration_busy, saved, collection=None):
-    session = Teleoperation(profile, mapping, readers, report_root, collection)
+    import os
+    factory = None
+    if os.environ.get("OPENARM_CARTESIAN_PROFILE"):
+        from .cartesian_teleop import load_factory
+        factory = load_factory(os.environ["OPENARM_CARTESIAN_PROFILE"])
+    session = Teleoperation(profile, mapping, readers, report_root, collection, cartesian_factory=factory)
     with server.gui.add_folder("真实从臂跟随"):
         server.gui.add_markdown("从臂回零后，以主臂当前位置开始相对跟随，无需精确对齐主臂。回零仅移动从臂七关节，夹爪保持；停止或页面断开会失能。")
-        choice = server.gui.add_dropdown("跟随机械臂", options=("双臂", "右臂", "左臂"), initial_value="双臂")
+        modes = ("末端 IK · 虚拟主臂", "旧版 · 逐关节") if factory else ("旧版 · 逐关节",)
+        mode = server.gui.add_dropdown("控制方式", options=modes, initial_value=modes[0])
+        if factory:
+            server.gui.add_markdown("末端 IK：小主臂驱动虚拟大臂末端，再求从臂关节；不是小主臂真实 TCP 映射。可从当前静止姿态直接接管，无需回零。尚无桌面避障，请保持空旷。")
+        choice = server.gui.add_dropdown("跟随机械臂", options=("双臂", "右臂", "左臂"), initial_value="左臂" if factory else "双臂")
         home = server.gui.add_button("① 从臂缓慢回零")
         start = server.gui.add_button("② 开始相对跟随" if collection else "开始跟随")
         stop = server.gui.add_button("停止 · 失能", color="red")
@@ -364,6 +400,8 @@ def attach(server, profile, mapping, readers, report_root, mapping_lock, calibra
                 sides = {"双臂": ("left", "right"), "右臂": ("right",), "左臂": ("left",)}[choice.value]
                 if session.busy:
                     session.resume(event.client.client_id)
+                elif mode.value == "末端 IK · 虚拟主臂":
+                    session.start(event.client.client_id, sides, mode="cartesian")
                 elif collection:
                     raise ValueError("请先点击从臂缓慢回零")
                 else:
@@ -383,7 +421,8 @@ def attach(server, profile, mapping, readers, report_root, mapping_lock, calibra
                     session.return_zero(event.client.client_id)
                 else:
                     sides = {"双臂": ("left", "right"), "右臂": ("right",), "左臂": ("left",)}[choice.value]
-                    session.start(event.client.client_id, sides, home=True)
+                    session.start(event.client.client_id, sides, home=True,
+                                  mode="cartesian" if mode.value == "末端 IK · 虚拟主臂" else "joint")
             except Exception as exc:
                 session.message = str(exc)
 
@@ -399,9 +438,12 @@ def attach(server, profile, mapping, readers, report_root, mapping_lock, calibra
         refresh_collection()
         status.content = session.message
         phase = session.home.phase if session.home else "idle"
-        start.disabled = calibration_busy() or not saved() or (phase != "holding" if collection else session.busy and phase != "holding")
+        direct_ik = mode.value == "末端 IK · 虚拟主臂" and not session.busy
+        start.disabled = calibration_busy() or not saved() or (not direct_ik and (phase != "holding" if collection else session.busy and phase != "holding"))
+        start.label = "开始末端 IK 跟随" if mode.value == "末端 IK · 虚拟主臂" else ("② 开始相对跟随" if collection else "开始跟随")
         home.disabled = (calibration_busy() or not saved() or (session.busy and phase not in ("following", "holding"))
                          or bool(collection and collection.episode is not None))
         choice.disabled = session.busy
+        mode.disabled = session.busy
 
     return session, refresh

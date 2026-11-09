@@ -15,6 +15,39 @@ from openarm_runtime.teleoperation import Teleoperation, relative_offsets, follo
 
 
 class TeleoperationTests(unittest.TestCase):
+    def test_cartesian_dispatch_and_failure_use_existing_disable_lifecycle(self):
+        from test_arm import FakeBus
+        from contextlib import nullcontext
+        from dataclasses import asdict
+        bus = FakeBus()
+        bus.preflight = lambda: {mid: {'state': asdict(bus.state(mid))} for mid in range(1, 9)}
+        bus.close = Mock()
+        reader = Mock(snapshot=Mock(side_effect=lambda: (self.sample(), '', 1)))
+        calls = []
+        class Adapter:
+            metadata = {'mode': 'virtual_leader_fk_constrained_ik'}
+            def reset(self, base):
+                calls.append(('reset', dict(base)))
+            def step(self, targets, states, period):
+                calls.append(('step', period))
+                if len([x for x in calls if x[0] == 'step']) > 1:
+                    raise RuntimeError('IK rejected')
+                return dict(targets) | {1: .001}, {}
+        session = Teleoperation(Profile('can1', 'can0', True), self.mapping,
+                                {'a': reader, 'b': reader}, self.temp.name,
+                                cartesian_factory=lambda side: Adapter())
+        with patch('openarm_runtime.teleoperation.bus_lease', side_effect=lambda *a, **k: nullcontext()), \
+             patch('openarm_runtime.teleoperation.ClassicBus', return_value=bus), \
+             patch('openarm_runtime.teleoperation.check_modes'), \
+             patch('openarm_runtime.arm.time.sleep'):
+            session.start(1, ('left',), mode='cartesian')
+            session.worker.join(4)
+        self.assertFalse(session.busy)
+        self.assertFalse(bus.enabled)
+        self.assertIn('IK rejected', session.message)
+        self.assertAlmostEqual(bus.last_targets[1], .001)
+        self.assertEqual(calls[0][0], 'reset')
+
     def test_home_alignment_resume_recording_and_disable(self):
         from openarm_collection import Collection
         from test_arm import FakeBus
