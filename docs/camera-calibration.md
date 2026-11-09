@@ -14,7 +14,10 @@ and pinhole cameras with OpenCV's five distortion coefficients**, not fisheye
 lenses or wrist calibration. Select the board type and enter actual square counts
 (not inner-corner counts) and measured square length in metres. ChArUco additionally
 requires marker length and dictionary; these fields are hidden for checkerboards.
-No physical dimensions are prefilled or inferred. Confirm the lens model first.
+The page defaults to the operator-confirmed 10-by-7 checkerboard with 15 mm
+squares and camera `head`; these are editable, not inferred from the image.
+Change them when using another board. No session starts automatically.
+ChArUco marker size and dictionary still require explicit entry. Confirm the lens model first.
 
 For example, a 10-by-7-square board with measured 15 mm squares has 9-by-6 inner
 corners (54 total) and uses `square_size_m=0.015`. The ordinary checkerboard spec is:

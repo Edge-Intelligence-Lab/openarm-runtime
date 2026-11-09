@@ -287,6 +287,8 @@ class CalibrationViewTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('src',view.image.props)
                 self.assertFalse(work.root.exists())
                 self.assertEqual(view.board_type.value,'checkerboard')
+                self.assertEqual((view.camera.value,view.nx.value,view.ny.value,view.square.value),
+                                 ('head',10,7,.015))
                 self.assertFalse(view.marker.visible)
                 self.assertFalse(view.import_upload.enabled)
                 view.board_type.value='charuco'
