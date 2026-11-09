@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from openarm_platform import load_config
-from openarm_platform.app import Coordinator, create_app, serve
+from openarm_platform.app import Coordinator, LocalBoundary, create_app, serve
 
 
 class PlatformTests(unittest.TestCase):
@@ -84,7 +84,60 @@ assert not any(x in sys.modules for x in ('viser', 'serial', 'openarm_can', 'pax
 
 
 PLATFORM_INSTALLED = all(importlib.util.find_spec(name) is not None
-                         for name in ('nicegui', 'aiohttp', 'fastapi'))
+                          for name in ('nicegui', 'aiohttp', 'fastapi'))
+
+
+class LocalBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def exchange(self, host, *, origin=None, kind='http', method='GET', extra_headers=()):
+        messages = []
+        async def downstream(scope, receive, send):
+            if scope['type'] == 'websocket':
+                await send({'type': 'websocket.accept'})
+            else:
+                await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+                await send({'type': 'http.response.body', 'body': b'ok'})
+        async def receive():
+            return {'type': 'websocket.connect'} if kind == 'websocket' else {'type': 'http.request'}
+        async def send(message):
+            messages.append(message)
+        headers = [(b'host', host.encode())]
+        if origin is not None:
+            headers.append((b'origin', origin.encode()))
+        await LocalBoundary(downstream)({'type': kind, 'method': method,
+                                        'headers': headers + list(extra_headers)}, receive, send)
+        return messages[0]
+
+    async def test_exact_preview_hostname_accepts_reads_and_same_origin_events(self):
+        host = 'openchamber-preview.localhost:50310'
+        self.assertEqual((await self.exchange(host))['status'], 200)
+        self.assertEqual((await self.exchange(host, method='POST', origin='http://' + host))['status'], 200)
+        self.assertEqual((await self.exchange(host, kind='websocket', origin='http://' + host))['type'],
+                         'websocket.accept')
+
+    async def test_preview_does_not_allow_lookalikes_malformed_or_duplicate_hosts(self):
+        for host in ('other.localhost:50310', 'evil.openchamber-preview.localhost:50310',
+                     'openchamber-preview.localhost.evil.invalid:50310',
+                     'openchamber-preview.localhost.:50310', 'openchamber-preview.localhost:invalid',
+                     'user@openchamber-preview.localhost:50310',
+                     'openchamber-preview.localhost:50310/path'):
+            with self.subTest(host=host):
+                self.assertEqual((await self.exchange(host))['status'], 403)
+        result = await self.exchange('openchamber-preview.localhost:50310',
+                                     extra_headers=[(b'host', b'localhost:50310')])
+        self.assertEqual(result['status'], 403)
+
+    async def test_preview_retains_exact_origin_scheme_port_and_websocket_checks(self):
+        host = 'openchamber-preview.localhost:50310'
+        for origin in (None, 'null', 'https://evil.invalid', 'http://localhost:50310',
+                       'http://openchamber-preview.localhost:50311',
+                       'https://' + host):
+            with self.subTest(origin=origin):
+                self.assertEqual((await self.exchange(host, method='POST', origin=origin))['status'], 403)
+                result = await self.exchange(host, kind='websocket', origin=origin)
+                self.assertEqual(result, {'type': 'websocket.close', 'code': 1008})
+        duplicate = await self.exchange(host, method='POST', origin='http://' + host,
+                                        extra_headers=[(b'origin', ('http://' + host).encode())])
+        self.assertEqual(duplicate['status'], 403)
 
 
 @unittest.skipUnless(PLATFORM_INSTALLED, 'Requires the platform extra')
@@ -150,6 +203,22 @@ class PlatformApiTests(unittest.TestCase):
         manager.start.assert_not_called()
         manager.activate.assert_not_called()
         manager.close.assert_called_once()
+
+    def test_openchamber_preview_api_keeps_attach_only_passive(self):
+        manager = Mock()
+        manager.status.return_value = {}
+        host = 'openchamber-preview.localhost:50310'
+        with self.client(manager, attach_only=True) as client:
+            response = client.get('/api/status', headers={'Host': host})
+            self.assertEqual(response.status_code, 200)
+            response = client.post('/api/select', json={'id': 'collection'},
+                                   headers={'Host': host, 'Origin': 'http://' + host})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()['services']['collection']['reachable'])
+            self.assertEqual(client.post('/api/select', json={'id': 'control'},
+                                         headers={'Host': host, 'Origin': 'http://localhost:50310'}).status_code, 403)
+        manager.start.assert_not_called()
+        manager.activate.assert_not_called()
 
     def test_failed_startup_still_cleans_up(self):
         manager = Mock()

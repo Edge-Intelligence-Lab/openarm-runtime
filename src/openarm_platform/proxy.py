@@ -8,6 +8,8 @@ import json
 import re
 from urllib.parse import urlsplit
 
+LOCAL_HOSTS = ('127.0.0.1', 'localhost', '::1', 'openchamber-preview.localhost')
+
 HOP_HEADERS = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
                'te', 'trailer', 'transfer-encoding', 'upgrade'}
 MAX_BODY = 16 * 1024 * 1024
@@ -47,7 +49,7 @@ def bridge(prefix, mapping):
     ports = {str(port): path + '/' for path, port in mapping.items()}
     return r'''<script>(()=>{'use strict';
 const base=BASE,ports=PORTS;
-const local=new Set(['127.0.0.1','localhost','[::1]']);
+const local=new Set(['127.0.0.1','localhost','[::1]','openchamber-preview.localhost']);
 function route(value){
  if(typeof value!=='string'&&!(value instanceof URL))return value;
  const raw=String(value);if(!/^(?:https?:|wss?:|\/)/.test(raw))return value;
@@ -105,7 +107,7 @@ def valid_host(headers):
     """Accept the local SSH-forward origin, never arbitrary DNS hostnames."""
     try:
         host = urlsplit('http://' + headers.get('host', ''))
-        return (host.hostname in ('127.0.0.1', 'localhost', '::1')
+        return (host.hostname in LOCAL_HOSTS
                 and host.username is None and host.password is None
                 and not host.path and not host.query and not host.fragment
                 and (host.port is None or 1 <= host.port <= 65535))

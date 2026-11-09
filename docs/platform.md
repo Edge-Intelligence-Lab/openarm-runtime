@@ -156,6 +156,14 @@ config API. Module pages now share the platform origin; browser preferences save
 separate-port pages may need to be set again. Machine configuration, calibration,
 log files and SDK/model artifacts stay outside version control.
 
+The HTTP/WebSocket boundary accepts the exact `openchamber-preview.localhost`
+hostname used by OpenChamber desktop previews, alongside `localhost`, `127.0.0.1`
+and `::1`. This permits its authenticated development tunnel (including paired
+remote connections) without another browser-side SSH forward. Other `.localhost`
+names and lookalike domains remain rejected. Requests with an Origin must still
+match the full HTTP origin, including its port; mutations and WebSockets require
+that Origin. This does not change the loopback bind or start any hardware service.
+
 ## Single-port routes
 
 These paths are useful for diagnostics; normal navigation stays in the platform.

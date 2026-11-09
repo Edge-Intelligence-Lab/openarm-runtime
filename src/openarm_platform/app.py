@@ -9,6 +9,7 @@ import socket
 from urllib.parse import urlsplit
 
 from .services import ServiceManager
+from .proxy import LOCAL_HOSTS
 
 
 class Coordinator:
@@ -66,6 +67,11 @@ class Coordinator:
 class LocalBoundary:
     """Protect both framework events and proxied modules on the loopback server."""
 
+    # OpenChamber carries loopback previews through its authenticated desktop
+    # tunnel without rewriting Host or Origin. Trust only its exact preview
+    # hostname, not arbitrary .localhost names; origin/port equality stays below.
+    allowed_hosts = LOCAL_HOSTS
+
     def __init__(self, app):
         self.app = app
 
@@ -78,7 +84,7 @@ class LocalBoundary:
         host = hosts[0] if len(hosts) == 1 else ''
         try:
             address = urlsplit('http://' + host)
-            valid = (bool(host) and address.hostname in ('127.0.0.1', 'localhost', '::1')
+            valid = (bool(host) and address.hostname in self.allowed_hosts
                      and address.netloc == host and not address.username and not address.password
                      and not address.path and not address.query and not address.fragment)
             _ = address.port  # Reject malformed port syntax.

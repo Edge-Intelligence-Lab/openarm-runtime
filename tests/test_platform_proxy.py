@@ -176,6 +176,29 @@ class PlatformProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers['X-Upstream-Origin'], f'http://127.0.0.1:{self.upstream_port}')
         self.assertEqual((await self.request('GET', '/apps/control/', headers={'Host': 'evil.invalid'}))[0], 403)
 
+    async def test_exact_openchamber_preview_host_works_for_module_http(self):
+        host = 'openchamber-preview.localhost:50310'
+        self.assertEqual((await self.request('GET', '/apps/control/', headers={'Host': host}))[0], 200)
+        code, headers, body = await self.request('POST', '/apps/control/settings', data=b'preview',
+                                                headers={'Host': host, 'Origin': 'http://' + host})
+        self.assertEqual((code, body), (200, b'preview'))
+        self.assertEqual(headers['X-Upstream-Origin'], f'http://127.0.0.1:{self.upstream_port}')
+        self.assertEqual((await self.request('POST', '/apps/control/settings', data=b'preview',
+                         headers={'Host': host, 'Origin': 'http://openchamber-preview.localhost:50311'}))[0], 403)
+        for other in ('other.localhost:50310', 'openchamber-preview.localhost.evil.invalid:50310'):
+            self.assertEqual((await self.request('GET', '/apps/control/', headers={'Host': other}))[0], 403)
+
+    async def test_openchamber_preview_module_websocket_keeps_origin_boundary(self):
+        import aiohttp
+        host = 'openchamber-preview.localhost:50310'
+        async with await self.websocket(headers={'Host': host}, origin='http://' + host) as websocket:
+            self.assertEqual((await websocket.receive()).data, b'initial-binary')
+            await websocket.send_str('preview-echo')
+            self.assertEqual((await websocket.receive(timeout=3)).data, 'preview-echo')
+        with self.assertRaises(aiohttp.WSServerHandshakeError) as failure:
+            await self.websocket(headers={'Host': host}, origin='http://localhost:50310')
+        self.assertEqual(failure.exception.status, 403)
+
     async def test_bounded_requests_and_unavailable_upstream(self):
         path = '/apps/control/settings'
         with patch('openarm_platform.proxy.MAX_BODY', 1024):
