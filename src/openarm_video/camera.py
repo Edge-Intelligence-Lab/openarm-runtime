@@ -32,6 +32,8 @@ class CameraConfig:
     depth_helper: str | None = None
     uri: str | None = None
 
+    calibration_identity: str | None = None
+
     def __post_init__(self):
         if not isinstance(self.name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", self.name):
             raise ValueError("Camera name must start with a letter and contain only letters, digits, _ or -")
@@ -54,10 +56,12 @@ class CameraConfig:
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
                 raise ValueError(f"Camera {name} must be a positive integer")
-        for name in ("depth_helper", "uri"):
+        for name in ("depth_helper", "uri", "calibration_identity"):
             value = getattr(self, name)
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 raise ValueError(f"Camera {name} must be a nonempty string or None")
+        if self.calibration_identity is not None and (len(self.calibration_identity) > 256 or not self.calibration_identity.isprintable()):
+            raise ValueError('Camera calibration_identity must be printable and at most 256 characters')
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,7 @@ class Frame:
     received_at: float
     sequence: int = 0
     pixel_format: str = "bgr8"
+    source_id: str = ""
 
     def fresh(self, now, max_age=3):
         return 0 <= now - self.received_at < max_age

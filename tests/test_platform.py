@@ -167,7 +167,7 @@ class PlatformApiTests(unittest.TestCase):
             manager.start.assert_called_once()
             response = client.get('/api/config')
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(len(response.json()['pages']), 6)
+            self.assertEqual(len(response.json()['pages']), 7)
             self.assertNotIn('command', response.text)
             self.assertNotIn('cwd', response.text)
             self.assertEqual(client.get('/api/status').json()['services'], client.app.state.coordinator.with_builtin(manager.status.return_value))

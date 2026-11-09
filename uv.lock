@@ -936,6 +936,12 @@ version = "0.8.1"
 source = { editable = "." }
 
 [package.optional-dependencies]
+calibration = [
+    { name = "flask" },
+    { name = "numpy" },
+    { name = "opencv-python-headless" },
+    { name = "scipy" },
+]
 cartesian = [
     { name = "daqp" },
     { name = "pin" },
@@ -976,11 +982,14 @@ requires-dist = [
     { name = "aiohttp", marker = "extra == 'platform'", specifier = "==3.14.5" },
     { name = "daqp", marker = "extra == 'cartesian'", specifier = "==0.11.0" },
     { name = "feetech-servo-sdk", marker = "extra == 'leader'", specifier = "==1.0.0" },
+    { name = "flask", marker = "extra == 'calibration'", specifier = "==3.1.3" },
     { name = "flask", marker = "extra == 'video'", specifier = "==3.1.3" },
     { name = "nanobind", marker = "extra == 'follower'", specifier = "==2.10.2" },
     { name = "nicegui", marker = "extra == 'platform'", specifier = "==3.18.0" },
+    { name = "numpy", marker = "extra == 'calibration'", specifier = "==2.5.4" },
     { name = "numpy", marker = "extra == 'video'", specifier = "==2.5.4" },
     { name = "openarm-can", marker = "extra == 'follower'", git = "https://github.com/enactic/openarm_can.git?subdirectory=python&rev=bfd4e52194aefe38389fa6e670be3738136facb9" },
+    { name = "opencv-python-headless", marker = "extra == 'calibration'", specifier = "==4.13.0.92" },
     { name = "opencv-python-headless", marker = "extra == 'video'", specifier = "==4.13.0.92" },
     { name = "paxini-sdk", marker = "extra == 'tactile'", git = "https://github.com/Jingyi-Z/paxini-sdk.git?rev=79c82145f88e158dd7706736e8c07f14f11cbd7a" },
     { name = "pin", marker = "extra == 'cartesian'", specifier = "==4.1.0" },
@@ -990,9 +999,10 @@ requires-dist = [
     { name = "pyserial", marker = "extra == 'leader'", specifier = "==3.5" },
     { name = "pyserial", marker = "extra == 'tactile'", specifier = "==3.5" },
     { name = "scikit-build-core", marker = "extra == 'follower'", specifier = "==1.1.1" },
+    { name = "scipy", marker = "extra == 'calibration'", specifier = "==1.18.1" },
     { name = "viser", extras = ["urdf"], marker = "extra == 'viewer'", specifier = "==1.1.1" },
 ]
-provides-extras = ["gravity", "cartesian", "platform", "leader", "viewer", "tactile", "video", "follower"]
+provides-extras = ["gravity", "cartesian", "platform", "leader", "viewer", "tactile", "video", "calibration", "follower"]
 
 [[package]]
 name = "opencv-python-headless"

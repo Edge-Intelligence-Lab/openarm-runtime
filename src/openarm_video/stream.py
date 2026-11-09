@@ -9,6 +9,8 @@ from dataclasses import replace
 from importlib.resources import files
 import math
 import time
+import hashlib
+import json
 
 
 def _dependencies():
@@ -151,6 +153,44 @@ def create_app(capture):
     @app.get("/frame/<name>.jpg")
     def rgb(name):
         return picture(name)
+
+    @app.get('/calibration/frame/<name>.png')
+    def calibration_frame(name):
+        # One borrowed snapshot supplies BOTH pixels and metadata; no device open,
+        # preview resize, crop, undistortion or timestamp relabelling is allowed.
+        config = configs.get(name)
+        if config is None or config.kind != 'rgb':
+            return jsonify(error='RGB camera not found'), 404
+        frame = current(name)
+        if frame is None:
+            return jsonify(error='No fresh camera frame'), 503
+        identity = getattr(config, 'calibration_identity', None)
+        source_id = getattr(frame, 'source_id', '')
+        if not identity or not source_id:
+            return jsonify(error='Configure calibration_identity; source must publish a generation'), 409
+        cv2, np = _dependencies()
+        image = frame.image
+        if (frame.pixel_format != 'bgr8' or not isinstance(image, np.ndarray)
+                or image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3
+                or max(image.shape[:2]) > 4096 or image.size > 24_000_000):
+            return jsonify(error='Calibration frame exceeds supported shape'), 413
+        ok, encoded = cv2.imencode('.png', image)
+        if not ok:
+            return jsonify(error='PNG encoding failed'), 503
+        data = encoded.tobytes()
+        if len(data) > 24_000_000:
+            return jsonify(error='Calibration PNG exceeds limit'), 413
+        metadata = dict(schema='openarm.calibration-frame.v1', camera_name=name,
+            camera_identity=identity, source_id=source_id, sequence=frame.sequence,
+            width=int(image.shape[1]), height=int(image.shape[0]), pixel_format='bgr8',
+            received_at_s=frame.received_at, timestamp_semantics='host_received_not_exposure',
+            clock_domain='host_monotonic',
+            age_s=time.monotonic()-frame.received_at, image_geometry='native_no_transform',
+            mode=dict(width=config.width, height=config.height, fps=config.fps),
+            simulation=bool(getattr(capture, 'simulate', False)),
+            png_sha256=hashlib.sha256(data).hexdigest())
+        return Response(data, content_type='image/png', headers={
+            'Cache-Control':'no-store', 'X-Calibration-Metadata':json.dumps(metadata, ensure_ascii=True)})
 
     @app.get("/depth/<name>.png")
     def depth(name):

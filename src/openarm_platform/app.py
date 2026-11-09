@@ -136,6 +136,9 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
     gateway = Gateway(config)
     from .policy import PolicyPreview
     preview = PolicyPreview(config.policy_record_root)
+    from .camera_calibration import CalibrationWorkspace
+    calibration = CalibrationWorkspace(config.calibration_root,
+        next(p.port for p in config.pages if p.id == 'vision'))
 
     @asynccontextmanager
     async def lifespan(app):
@@ -145,6 +148,7 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
             yield
         finally:
             coordinator.begin_shutdown()
+            calibration.close()
             try:
                 try:
                     await asyncio.to_thread(preview.close)
@@ -160,6 +164,7 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.gateway = gateway
     app.state.policy_preview = preview
+    app.state.camera_calibration = calibration
     app.state.coordinator = coordinator
     app.state.shutdown_error = None
     app.add_middleware(LocalBoundary)
@@ -200,6 +205,11 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
     if with_ui:
         from .policy_view import build_policy_view
         from .collection_view import build_collection_view
+        from .camera_calibration_view import build_camera_calibration_view
+
+        @ui.page('/camera-calibration', title='头部相机标定 · OpenArm')
+        async def camera_calibration_page():
+            build_camera_calibration_view(calibration)
 
         @ui.page('/collection', title='数采可视化 · OpenArm')
         async def collection_page():

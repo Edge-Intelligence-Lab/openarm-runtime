@@ -61,6 +61,21 @@ jobs:
           "$RUNNER_TEMP/runtime-test/bin/python" -I -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p 'test_video*.py'
           "$RUNNER_TEMP/runtime-test/bin/python" -I -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p 'test_collection*.py'
           "$RUNNER_TEMP/runtime-test/bin/python" "$GITHUB_WORKSPACE/examples/read_video.py" --help
+      - name: Test offline camera calibration from installed wheel
+        env:
+          OPENARM_EXPECT_INSTALLED: '1'
+        run: |
+          "$RUNNER_TEMP/runtime-test/bin/python" - <<'PY'
+          from pathlib import Path
+          import subprocess, sys
+          wheel = next(Path('dist').glob('*.whl')).resolve()
+          subprocess.run([sys.executable, '-m', 'pip', 'install', str(wheel) + '[calibration]'], check=True)
+          import cv2
+          assert hasattr(cv2.aruco, 'CharucoDetector'), 'Calibration requires indexed detection'
+          PY
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/runtime-test/bin/python" -I -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p 'test_camera*.py'
+          "$RUNNER_TEMP/runtime-test/bin/python" -I -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p 'test_platform_camera*.py'
       - name: Test optional tactile SDK from installed wheel
         env:
           OPENARM_EXPECT_INSTALLED: '1'

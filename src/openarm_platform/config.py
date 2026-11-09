@@ -46,6 +46,7 @@ class PlatformConfig:
     title: str = 'OpenArm Platform'
     policy_record_root: Path = field(default_factory=lambda: Path.home() / 'openarm-episodes')
     collection_root: Path = field(default_factory=lambda: Path.home() / 'openarm-collection')
+    calibration_root: Path = field(default_factory=lambda: Path.home() / '.local/share/openarm-calibration')
 
     @property
     def services(self):
@@ -68,7 +69,7 @@ def validate(config):
 
 def load_config(path=None):
     data = {} if path is None else json.loads(Path(path).expanduser().read_text())
-    if not isinstance(data, dict) or set(data) - {'title', 'port', 'services', 'support', 'log_dir', 'policy_record_root', 'collection_root'}:
+    if not isinstance(data, dict) or set(data) - {'title', 'port', 'services', 'support', 'log_dir', 'policy_record_root', 'collection_root', 'calibration_root'}:
         raise ValueError('Invalid platform configuration fields')
     base = Path.cwd() if path is None else Path(path).expanduser().resolve().parent
     entries = data.get('services', {})
@@ -116,6 +117,8 @@ def load_config(path=None):
         raise ValueError('title must be a nonempty string')
     pages.append(Page('collection', '数采可视化', None, '录制状态、数据流质量与多模态回放', path='/collection'))
     pages.append(Page('policy', '策略可视化', None, '策略仿真、目标与反馈轨迹、记录回放', path='/policy'))
+    pages.append(Page('camera_calibration', '头部相机标定', None,
+                      '原尺寸借帧、ChArUco 内参与留出检查、离线头部外参', path='/camera-calibration'))
     collection_root = path_value(data.get('collection_root', '~/openarm-collection'))
     if 'collection_root' not in data:
         teleop = next(p for p in pages if p.id == 'teleop')
@@ -130,4 +133,5 @@ def load_config(path=None):
                     collection_root = (profile.parent / acquisition['root']).resolve()
     return validate(PlatformConfig(valid_port(data.get('port', 8888)), tuple(pages),
                                    path_value(data.get('log_dir', '~/.local/state/openarm-platform')),
-                                   tuple(auxiliary), title, path_value(data.get('policy_record_root', '~/openarm-episodes')), collection_root))
+                                   tuple(auxiliary), title, path_value(data.get('policy_record_root', '~/openarm-episodes')), collection_root,
+                                   path_value(data.get('calibration_root', '~/.local/share/openarm-calibration'))))

@@ -181,6 +181,25 @@ are forwarded through these paths without requiring client access to the
 internal ports. `/api/status` reports page service availability; it does not
 report synchronized hardware data or certify that a motor is disabled.
 
+## Head camera calibration
+
+Open **头部相机标定** at `/#camera_calibration` or `/camera-calibration`.
+Install the optional `[platform,calibration]` dependencies. The built-in page
+borrows native lossless frames from the existing vision owner; it never opens a
+device, starts a service or moves the robot. Supply actual board parameters and
+the camera's external `calibration_identity`. An optional `calibration_root` in
+the platform JSON sets the external evidence directory (default
+`~/.local/share/openarm-calibration`); relative paths resolve beside that JSON.
+No path or upstream URL can be supplied from the browser.
+
+The first version implements ChArUco pinhole intrinsics, predeclared held-out
+image checks, bounded offline head-extrinsic JSON import and explicit immutable
+candidate saving. Real-time extrinsic capture is disabled because trusted
+exposure-time/FK pairing is unavailable. Saving does not install a machine
+profile. See [camera calibration](camera-calibration.md) for the workflow,
+limits, cancellation/ownership and the distinction between image checks and
+physical verification.
+
 ## Policy visualization
 
 The platform includes an internal **策略可视化** module at

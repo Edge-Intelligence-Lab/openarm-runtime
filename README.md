@@ -53,6 +53,11 @@ Cartesian policy execution is an explicit geometry-declared capability, not join
 relabeling; trained-policy hardware acceptance remains separate.
 Offline [head/wrist hand-eye calibration](docs/camera-calibration.md) fits measured,
 synchronized board/FK observations without opening devices or installing estimates.
+The unified platform's **头部相机标定** (`/#camera_calibration`) adds ChArUco
+pinhole intrinsics, native lossless borrowed frames, held-out image checks and
+explicit candidate saving; install `.[platform,calibration]` from this checkout.
+Real-time external-pose capture stays disabled until trusted exposure/FK pairing
+exists. See the [web workflow and verification boundaries](docs/camera-calibration.md#unified-web-workflow-head-camera-only).
 An optional fixed preparation can connect from actual feedback, move to task-ready,
 open the gripper and hand off to the model in the same operator-started episode.
 Shared bilateral gravity configuration and per-arm feedforward apply beneath all
@@ -82,6 +87,7 @@ Extras compose freely:
 - `viewer`: Viser + URDF/mesh loading.
 - `tactile`: pinned community Paxini SDK + PySerial; combine with `viewer` for visualization.
 - `video`: OpenCV headless + NumPy + Flask; independent of Viser, leaders and CAN.
+- `calibration`: video dependencies + SciPy for offline calibration and the optional web workflow.
 - `platform`: NiceGUI/FastAPI dashboard and aiohttp gateway.
 - `follower`: official OpenArm CAN SDK 1.4.1 and its build dependencies.
 

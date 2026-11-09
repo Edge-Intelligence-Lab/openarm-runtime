@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 import threading
 import time
+import uuid
 
 from .camera import CameraConfig, Frame, OpenCVCamera, SimulationCamera
 
@@ -85,6 +86,7 @@ class CameraReader:
             source = None
             try:
                 source = self._factory(self.config)
+                source_id = uuid.uuid4().hex
                 with self._lock:
                     self._source = source
                 while not self._stop.is_set():
@@ -96,7 +98,7 @@ class CameraReader:
                         break
                     with self._lock:
                         self._count += 1
-                        self._frame = replace(sample, sequence=self._count)
+                        self._frame = replace(sample, sequence=self._count, source_id=source_id)
                         self._error = ""
                     if self.on_sample is not None:
                         self.on_sample(self._frame, self._count)

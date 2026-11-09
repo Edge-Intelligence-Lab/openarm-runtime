@@ -1,5 +1,90 @@
 # Offline head/wrist hand-eye calibration
 
+## Unified web workflow (head camera only)
+
+The platform now includes **头部相机标定** at `/#camera_calibration`, or
+`/camera-calibration` on the same server. Install `.[platform,calibration]`.
+Opening the page does not open a camera, acquire CAN, select a controller or
+start a service. It also works in `--attach-only` mode. Existing configured video
+capture must already be available; the page never restarts it. All robot movement
+remains with the on-site operator and the existing control interface.
+
+This first version supports **indexed ChArUco boards and ordinary pinhole cameras
+with OpenCV's five distortion coefficients**, not symmetric chessboards, fisheye
+lenses or wrist calibration. Enter the actual printed board's square counts,
+measured square/marker lengths in metres and dictionary. No physical dimensions
+are prefilled or inferred. Confirm the lens model before using this workflow.
+
+In the external video profile, add a nonempty `calibration_identity` to the RGB
+camera entry: use the actual camera serial, lens and fixed installation identity.
+Update that identity whenever the lens, focus/zoom setting, camera mounting or
+driver crop changes. This is operator-supplied provenance, not automatically
+verified hardware identity. A changed capture generation, resolution, nominal
+capture mode or identity is rejected inside a session. The capture backend does
+not currently measure focus, crop or exposure settings; freeze those physically.
+
+The borrowed endpoint is `/apps/vision/calibration/frame/head.png` (replace
+`head` with the configured camera ID). The video owner encodes one existing
+snapshot as lossless PNG at its actual capture resolution, with atomic metadata
+in `X-Calibration-Metadata`. It does not reopen the device or use the resized
+JPEG preview. Frames without a configured identity/generation fail closed. Old
+external vision services need this contract; the browser cannot provide a custom
+URL as a workaround. RGB frames are bounded to 4096 pixels per dimension,
+8 million pixels total and 24 MB encoded PNG.
+
+1. Start a session explicitly; this creates evidence under the external
+   `calibration_root` platform setting (default `~/.local/share/openarm-calibration`).
+   The browser cannot choose filesystem paths. Starting the platform/page alone
+   does not create evidence. Preview is separately opt-in.
+2. Move the **hand-held** board through image centre/edges, different distances
+   and tilts about two axes. Before every capture, select fit or held-out
+   validation. At least 8 fit and 3 held-out images are required. The detector
+   requires 8 non-collinear indexed corners with at least 20-pixel span in both
+   image axes. Corner counts, image coverage/centre and a sharpness indicator
+   help the operator; they are not physical acceptance criteria.
+3. Solve and inspect per-image RMS, K and distortion. Only fit images calibrate
+   K; held-out images estimate their own board poses with that fixed K. A
+   two-axis board-normal excitation check rejects degenerate captures. No sample
+   is silently removed. **Held-out reprojection is not independent metric
+   verification**: inspect board scale, camera model, image geometry and known
+   physical references before any deployment. High residuals remain visible;
+   they do not become verified merely because a candidate can be saved.
+4. Optionally import an existing compliant **head** observation JSON, up to 2 MB
+   and 256 samples, to run the offline external-pose fit below. Camera name must
+   match the session. Original upload bytes and their hash are preserved.
+   Imported timing/FK/model/intrinsics provenance is supplied by the operator,
+   not verified by the web runtime. Imported external poses are explicitly
+   **not bound to the web-solved intrinsics**; do not treat the bundle as an
+   automatically compatible deployed profile.
+5. Check the explicit confirmation box to save `SESSION/candidate.json` without
+   overwriting an old result. The candidate records evidence hashes, board and
+   camera identity, fit/validation split, numerical-library versions and solver
+   source hashes. Original PNGs and their metadata/detected corners live under
+   `SESSION/SAMPLE/`; original external-pose imports live under `SESSION/head-*/`.
+   All results remain `estimated_not_independently_verified`, `installed: false`.
+   Saving never changes a machine profile or activates calibration.
+
+**Real-time external-pose capture is deliberately disabled.** Existing video
+`received_at` is host receipt after `read()`, not exposure time. There is no
+trusted exposure-time/measured-FK pairing interface yet. Do not relabel receipt
+times or ordinary recordings to satisfy the offline 50 ms contract. For head
+external-pose calibration the camera is fixed to base and the board must be
+rigidly attached to the tool; a freely hand-held board cannot establish
+`base_from_camera` without another measured base reference.
+
+One browser owns the session; other browsers cannot capture, cancel or save it.
+An inactive lease expires after 120 seconds without owner heartbeat/action.
+Cancellation invalidates late computation results and retains evidence. It does
+not close borrowed devices or stop another page's motion: **cancel is not an
+emergency stop**. Page navigation preserves platform iframes, so use the explicit
+cancel button rather than assuming a hidden page has stopped. Sessions are
+bounded to 64 images and 256 MiB of PNG data. Evidence already written is retained
+on cancellation, failure and server shutdown; session resumption and deletion
+are not provided in this first version. Candidate creation is atomic and
+no-clobber; interrupted partial evidence is not a saved candidate.
+
+## Offline external-pose CLI
+
 This tool never opens cameras, CAN, or motors, and never installs its output.
 Install the optional scientific/video dependencies in an offline environment.
 The indexed detector additionally needs OpenCV with `aruco.CharucoDetector`.

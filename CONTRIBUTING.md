@@ -17,6 +17,15 @@ For tactile capture, use `--extra tactile`; add `--extra viewer` for visualizati
 `openarm-runtime tactile --simulate` uses software data without opening serial ports.
 Native follower setup is documented in [workstation setup](docs/workstation.md).
 
+For offline camera calibration, add `--extra calibration` (and `--extra platform`
+for the web page). Run `python -m unittest discover -s tests -p 'test_camera*.py'`
+and `python -m unittest discover -s tests -p 'test_platform_camera*.py'`.
+These use known synthetic projections, indexed board images and borrowed fake
+capture snapshots, never physical cameras or CAN. CI checks ChArUco capability
+and executes these tests from the installed wheel rather than accepting a fully
+skipped calibration suite. Keep real camera identities and board measurements
+in external profiles/evidence, not fixtures claiming hardware validation.
+
 When developing the runtime together with another application, install this
 checkout into that application's environment in editable mode. The checkout can
 live anywhere; no sibling-directory layout is required. See the README's
