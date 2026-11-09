@@ -138,6 +138,29 @@ class WorkspaceTests(unittest.TestCase):
         observations['mode']='wrist'
         with self.assertRaises(ValueError):self.work.import_head('a',json.dumps(observations).encode())
 
+    def test_checkerboard_capture_records_local_grid_and_blocks_external_pose(self):
+        import cv2
+        import numpy as np
+        self.work.cancel('a')
+        spec=dict(type='checkerboard',squares_x=10,squares_y=7,square_size_m=.015)
+        self.work.start('a','head',spec)
+        image=np.full((600,800,3),255,np.uint8)
+        for y in range(7):
+            for x in range(10):
+                image[90+y*50:90+(y+1)*50,150+x*50:150+(x+1)*50]=255*((x+y)%2)
+        raw=cv2.imencode('.png',image)[1].tobytes()
+        self.packet=(raw,dict(self.packet[1],png_sha256=hashlib.sha256(raw).hexdigest()))
+        sample=self.work.capture('a','validation')
+        self.assertEqual(len(sample['detection']['pixels']),54)
+        self.assertEqual(sample['detection']['board_frame_status'],'per_image_grid_ambiguous_for_extrinsics')
+        session=document((Path(self.temp.name)/self.work.session_id/'session.json').read_bytes())
+        self.assertEqual(session['board_spec'],spec)
+        with patch('openarm_runtime.camera_calibration.fit',side_effect=AssertionError('must not fit')):
+            with self.assertRaisesRegex(ValueError,'固定板坐标方向'):
+                self.work.import_head('a',b'{}')
+        self.assertFalse(self.work.busy)
+        self.assertFalse(self.work.status('a')['realtime_extrinsics'])
+
     def test_count_and_storage_budgets_and_capture_failure_leave_no_sample(self):
         self.work.samples=[dict(metadata=dict(sequence=i)) for i in range(64)]
         with self.assertRaises(ValueError):self.work.capture('a','fit')
@@ -257,6 +280,13 @@ class CalibrationViewTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(work.state,'idle')
                 self.assertFalse(work.root.exists())
                 self.assertFalse(view.previewing)
+                self.assertEqual(view.board_type.value,'checkerboard')
+                self.assertFalse(view.marker.visible)
+                self.assertFalse(view.import_upload.enabled)
+                view.board_type.value='charuco'
+                view.board_fields()
+                self.assertTrue(view.marker.visible)
+                self.assertTrue(view.import_upload.enabled)
         from starlette.testclient import TestClient
         from openarm_platform.app import create_app
         manager=Mock();manager.status.return_value={}

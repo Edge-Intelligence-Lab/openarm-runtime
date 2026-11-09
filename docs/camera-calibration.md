@@ -9,11 +9,28 @@ start a service. It also works in `--attach-only` mode. Existing configured vide
 capture must already be available; the page never restarts it. All robot movement
 remains with the on-site operator and the existing control interface.
 
-This first version supports **indexed ChArUco boards and ordinary pinhole cameras
-with OpenCV's five distortion coefficients**, not symmetric chessboards, fisheye
-lenses or wrist calibration. Enter the actual printed board's square counts,
-measured square/marker lengths in metres and dictionary. No physical dimensions
-are prefilled or inferred. Confirm the lens model before using this workflow.
+Intrinsics support **ordinary black/white checkerboards or indexed ChArUco boards,
+and pinhole cameras with OpenCV's five distortion coefficients**, not fisheye
+lenses or wrist calibration. Select the board type and enter actual square counts
+(not inner-corner counts) and measured square length in metres. ChArUco additionally
+requires marker length and dictionary; these fields are hidden for checkerboards.
+No physical dimensions are prefilled or inferred. Confirm the lens model first.
+
+For example, a 10-by-7-square board with measured 15 mm squares has 9-by-6 inner
+corners (54 total) and uses `square_size_m=0.015`. The ordinary checkerboard spec is:
+
+```json
+{"type":"checkerboard","squares_x":10,"squares_y":7,"square_size_m":0.015}
+```
+
+The full grid must be visible; partial checkerboard detections are rejected.
+Checkerboard corner IDs are **per-image grid indices**, not globally indexed
+physical corners. This is sufficient for intrinsic fitting, but does not establish
+a fixed board coordinate frame across rotated views for hand-eye fitting. Such
+sessions explicitly reject external-pose imports; adding a direction mark alone
+does not make the current detector verify it. Existing indexed ChArUco sessions
+retain the offline head observation import. Real-time external-pose capture stays
+disabled for both board types.
 
 In the external video profile, add a nonempty `calibration_identity` to the RGB
 camera entry: use the actual camera serial, lens and fixed installation identity.

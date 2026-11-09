@@ -53,8 +53,8 @@ Cartesian policy execution is an explicit geometry-declared capability, not join
 relabeling; trained-policy hardware acceptance remains separate.
 Offline [head/wrist hand-eye calibration](docs/camera-calibration.md) fits measured,
 synchronized board/FK observations without opening devices or installing estimates.
-The unified platform's **头部相机标定** (`/#camera_calibration`) adds ChArUco
-pinhole intrinsics, native lossless borrowed frames, held-out image checks and
+The unified platform's **头部相机标定** (`/#camera_calibration`) adds ChArUco and
+ordinary-checkerboard pinhole intrinsics, native lossless borrowed frames, held-out image checks and
 explicit candidate saving; install `.[platform,calibration]` from this checkout.
 Real-time external-pose capture stays disabled until trusted exposure/FK pairing
 exists. See the [web workflow and verification boundaries](docs/camera-calibration.md#unified-web-workflow-head-camera-only).

@@ -1,9 +1,34 @@
-"""Offline indexed-board pinhole calibration. No device or filesystem access."""
+"""Offline ChArUco/checkerboard pinhole calibration; no device or file access."""
+from dataclasses import dataclass
 import math
+
+
+@dataclass(frozen=True)
+class Checkerboard:
+    squares_x: int
+    squares_y: int
+    square_size_m: float
+
+    def getChessboardCorners(self):
+        """Per-image grid coordinates, NOT globally indexed physical corners."""
+        import numpy as np
+        points = np.zeros(((self.squares_x-1)*(self.squares_y-1), 3), np.float32)
+        points[:, :2] = np.mgrid[0:self.squares_x-1, 0:self.squares_y-1].T.reshape(-1, 2)
+        return points * self.square_size_m
 
 
 def board(spec):
     import cv2
+    if isinstance(spec, dict) and spec.get('type') == 'checkerboard':
+        if set(spec) != {'type', 'squares_x', 'squares_y', 'square_size_m'}:
+            raise ValueError('普通棋盘格只填写方格总数与实测格长；不填写 marker 或字典')
+        nx, ny, square = (spec[k] for k in ('squares_x', 'squares_y', 'square_size_m'))
+        if (type(nx) is not int or type(ny) is not int or not 4 <= nx <= 40 or not 4 <= ny <= 40
+                or type(square) not in (int, float) or not math.isfinite(square) or not 0 < square <= .2):
+            raise ValueError('无效的普通棋盘格规格（方格总数，格长单位为米）')
+        return Checkerboard(nx, ny, float(square))
+    if isinstance(spec, dict) and spec.get('type') == 'charuco':
+        spec = {k:v for k,v in spec.items() if k != 'type'}
     if not isinstance(spec, dict) or set(spec) != {
             'squares_x', 'squares_y', 'square_size_m', 'marker_size_m', 'dictionary'}:
         raise ValueError('填写完整 ChArUco 板规格；不从图像猜测尺寸')
@@ -28,16 +53,28 @@ def detect(image_rgb, spec):
         raise ValueError('需要 RGB uint8 原始尺寸图像')
     target = board(spec)
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    corners, ids, _, _ = cv2.aruco.CharucoDetector(target).detectBoard(gray)
-    if ids is None or len(ids) < 8 or target.checkCharucoCornersCollinear(ids):
-        raise ValueError('至少需要八个不共线的 ChArUco 角点')
-    objects, pixels = target.matchImagePoints(corners, ids)
+    if isinstance(target, Checkerboard):
+        found, pixels = cv2.findChessboardCornersSB(gray,
+            (target.squares_x-1, target.squares_y-1), flags=cv2.CALIB_CB_NORMALIZE_IMAGE)
+        expected = (target.squares_x-1)*(target.squares_y-1)
+        if not found or pixels is None or len(pixels) != expected:
+            raise ValueError(f'未检测到完整 {target.squares_x-1}×{target.squares_y-1} 内角点；请露出整块棋盘格')
+        objects = target.getChessboardCorners()
+        ids = np.arange(expected)
+        frame_status = 'per_image_grid_ambiguous_for_extrinsics'
+    else:
+        corners, ids, _, _ = cv2.aruco.CharucoDetector(target).detectBoard(gray)
+        if ids is None or len(ids) < 8 or target.checkCharucoCornersCollinear(ids):
+            raise ValueError('至少需要八个不共线的 ChArUco 角点')
+        objects, pixels = target.matchImagePoints(corners, ids)
+        frame_status = 'indexed_charuco_board'
     xy = pixels.reshape(-1, 2)
     span = np.ptp(xy, axis=0)
     if min(span) < 20:
         raise ValueError('板在图像中过小，角点跨度不足 20 px')
     return dict(objects=objects.reshape(-1, 3).tolist(), pixels=xy.tolist(),
                 corner_ids=ids.ravel().tolist(),
+                board_frame_status=frame_status,
                 center_normalized=(xy.mean(axis=0) / [image.shape[1], image.shape[0]]).tolist(),
                 coverage_fraction=float(np.prod(span) / (image.shape[0]*image.shape[1])),
                 sharpness=float(cv2.Laplacian(gray, cv2.CV_64F).var()))

@@ -256,6 +256,8 @@ class CalibrationWorkspace:
     def import_head(self, owner, raw):
         epoch = self._begin(owner)
         try:
+            if self.spec.get('type') == 'checkerboard':
+                raise ValueError('普通棋盘格尚未建立跨图像固定板坐标方向；本会话仅支持内参，不接受外参导入')
             observations = document(raw)
             if observations.get('mode') != 'head' or len(observations.get('samples', [])) > 256:
                 raise ValueError('仅支持最多 256 组 head 外参观测，不支持腕部')

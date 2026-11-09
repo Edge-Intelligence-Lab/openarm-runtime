@@ -192,7 +192,7 @@ the platform JSON sets the external evidence directory (default
 `~/.local/share/openarm-calibration`); relative paths resolve beside that JSON.
 No path or upstream URL can be supplied from the browser.
 
-The first version implements ChArUco pinhole intrinsics, predeclared held-out
+The workflow implements ChArUco and ordinary-checkerboard pinhole intrinsics, predeclared held-out
 image checks, bounded offline head-extrinsic JSON import and explicit immutable
 candidate saving. Real-time extrinsic capture is disabled because trusted
 exposure-time/FK pairing is unavailable. Saving does not install a machine

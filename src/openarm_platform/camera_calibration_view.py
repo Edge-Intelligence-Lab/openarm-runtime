@@ -21,19 +21,22 @@ class CalibrationView:
         with ui.column().classes('calibration-workspace'):
             ui.label('头部相机标定').classes('text-2xl font-semibold')
             ui.label('只读借帧，不启动相机或运动硬件。取消不是急停；保存不等于激活。').classes('text-orange-9')
-            ui.label('首版：ChArUco + 普通针孔镜头（OpenCV 五参数畸变）；不支持普通棋盘、鱼眼或腕部标定。')
+            ui.label('支持普通棋盘格 / ChArUco 内参 + 普通针孔镜头（OpenCV 五参数畸变）；不支持鱼眼或腕部标定。')
             self.status_label = ui.label('未开始').props('role=status data-testid=calibration-status')
             self.error = ui.label('').classes('text-red-8 whitespace-pre-wrap').props('role=alert data-testid=calibration-error')
             with ui.card().classes('calibration-card'):
                 ui.label('1 · 参数与原尺寸预览').classes('text-lg font-medium')
                 ui.label('先在外部视频配置填写 calibration_identity（相机序列号/镜头/固定安装身份）。板参数必须来自实际打印板。')
+                self.board_type = ui.radio({'checkerboard':'普通黑白棋盘格', 'charuco':'ChArUco'},
+                    value='checkerboard', on_change=lambda:self.board_fields()).props('inline data-testid=calibration-board-type')
+                ui.label('填写黑白方格总数，不是内角点数；例如 10×7 格对应 9×6 内角点。格长 15 mm 应填 0.015 m。')
                 with ui.row().classes('w-full items-center flex-wrap'):
                     self.camera = ui.input('已有视频服务中的相机 ID', value='head').classes('w-64 shrink-0').props('data-testid=calibration-camera')
                     self.nx = ui.number('横向方格数', min=4, max=40, precision=0).classes('w-40 shrink-0')
                     self.ny = ui.number('纵向方格数', min=4, max=40, precision=0).classes('w-40 shrink-0')
                     self.square = ui.number('实测格长（米）', min=0, max=.2, precision=6).classes('w-40 shrink-0')
                     self.marker = ui.number('实测 marker 长（米）', min=0, max=.2, precision=6).classes('w-48 shrink-0')
-                ui.label('打印板字典（必须与实际打印板一致）')
+                self.dictionary_label = ui.label('ChArUco 打印板字典（必须与实际打印板一致）')
                 self.dictionary = ui.radio(['DICT_4X4_50','DICT_5X5_100','DICT_6X6_250']).props('inline data-testid=calibration-dictionary')
                 ui.button('开始新会话并保存采集证据', on_click=self.start).props('data-testid=calibration-start')
                 ui.button('开启/暂停只读原尺寸预览', on_click=self.toggle_preview).props('outline data-testid=calibration-preview-toggle')
@@ -59,9 +62,10 @@ class CalibrationView:
                 ui.button('实时外参采集不可用').disable()
                 ui.label('缺少可信曝光时间与实测 FK 配对。不能用收帧时间冒充曝光时间。头相机须固定于基座、板刚性固定于末端；自由手持板不能解 base_from_camera。')
                 ui.label('可导入最多 2 MB 的既有 head 观测 JSON。观测来源由操作者负责；导入不会证明同步或物理验证。')
-                ui.upload(label='导入 head 观测 JSON', auto_upload=True,
+                self.import_upload = ui.upload(label='导入 head 观测 JSON', auto_upload=True,
                           max_file_size=2_000_000, on_upload=self.import_head,
-                          on_rejected=lambda: ui.notify('文件超过 2 MB 限制', type='negative')).props('accept=.json data-testid=calibration-import')
+                           on_rejected=lambda: ui.notify('文件超过 2 MB 限制', type='negative')).props('accept=.json data-testid=calibration-import')
+                self.board_warning = ui.label('普通棋盘格角点编号只在单张图中有效；未解决固定板坐标方向前，仅支持内参，不接受本会话外参导入。').classes('text-orange-9')
             with ui.card().classes('calibration-card'):
                 ui.label('4 · 检查估计并确认保存').classes('text-lg font-medium')
                 self.result_summary = ui.label('尚无估计').classes('whitespace-pre-wrap').props('data-testid=calibration-result-summary')
@@ -72,6 +76,14 @@ class CalibrationView:
                 ui.label('证据目录由可信外部平台配置 calibration_root 指定。所有原图、样本用途和来源保留；不覆盖旧候选。')
         self.timer = ui.timer(2, self.refresh_preview, active=False)
         ui.timer(1, self.refresh)
+        self.board_fields()
+
+    def board_fields(self):
+        charuco = self.board_type.value == 'charuco'
+        for field in (self.marker, self.dictionary, self.dictionary_label):
+            field.set_visibility(charuco)
+        self.board_warning.set_visibility(not charuco)
+        self.import_upload.set_enabled(charuco)
 
     async def action(self, function, *args, **kwargs):
         if self.working:
@@ -93,9 +105,10 @@ class CalibrationView:
                 if value is None or isinstance(value, bool) or int(value) != value:
                     raise ValueError('填写实际方格整数，不使用默认猜测')
                 return int(value)
-            spec = dict(squares_x=count(self.nx.value), squares_y=count(self.ny.value),
-                        square_size_m=self.square.value, marker_size_m=self.marker.value,
-                        dictionary=self.dictionary.value)
+            spec = dict(type=self.board_type.value, squares_x=count(self.nx.value),
+                        squares_y=count(self.ny.value), square_size_m=self.square.value)
+            if self.board_type.value == 'charuco':
+                spec.update(marker_size_m=self.marker.value, dictionary=self.dictionary.value)
             await self.action(self.workspace.start, self.camera.value, spec)
             self.confirm.value = False
         except (ValueError, TypeError) as exc:
@@ -151,7 +164,7 @@ class CalibrationView:
 
     async def refresh(self):
         status = await asyncio.to_thread(self.workspace.status, self.owner)
-        for field in (self.camera, self.nx, self.ny, self.square, self.marker, self.dictionary):
+        for field in (self.camera, self.board_type, self.nx, self.ny, self.square, self.marker, self.dictionary):
             field.set_enabled(status['state'] not in ('collecting', 'estimated') and not status['busy'])
         self.status_label.set_text(f"状态：{status['state']} · {'本浏览器所有' if status['mine'] else '无写入所有权'} · {'处理中' if status['busy'] else '空闲'} · 会话 {status['session_id'] or '—'}")
         # Other browsers see only session state, not another operator's evidence.
