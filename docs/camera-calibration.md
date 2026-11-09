@@ -18,9 +18,20 @@ banner above the viewport. Preview errors have a reconnect action beside the
 image. An unstarted or foreign-owned session has no capture control.
 
 **标定照片** means fit images; **检查照片** means predeclared held-out validation.
-The two counters show the unchanged minima of 8 and 3. After 8 fit images, the
-page offers **下一步：拍检查照片** without silently changing photo purpose.
-**计算标定结果** enables only after both counts qualify, and reports errors at
+The capture panel illustrates the next recommended pose: camera-view position,
+which edge is nearer the lens (blue), and an approximate 25–30 degree tilt.
+It distinguishes tilt from rolling the board in the image. The 16 fit suggestions
+cover four front views, four yaw tilts, four pitch tilts and four combined tilts;
+four validation suggestions are independently declared before capture. A collapsed
+overview previews the four basic directions without changing the current step.
+The diagrams are pure perspective geometry, not real-time pose measurements or
+photographable calibration patterns. No robot is moved, no detection is claimed
+from a drawing, and counts do not prove the requested pose was followed.
+
+Only accepted photos advance the illustration; failures keep the same step.
+Counters show the recommended 16 and 4 while the solver's unchanged minima remain
+8 and 3. After 16 fit images, the page offers **下一步：拍检查照片** without silently changing photo purpose.
+**计算标定结果** enables at the unchanged 8-fit/3-validation minimum, and reports errors at
 that button. Counts are not physical acceptance. Results and save confirmation
 appear only once an estimate exists. Saving remains an explicit, unverified
 candidate operation; there is no automatic installation.
@@ -45,10 +56,11 @@ and pinhole cameras with OpenCV's five distortion coefficients**, not fisheye
 lenses or wrist calibration. Select the board type and enter actual square counts
 (not inner-corner counts) and measured square length in metres. ChArUco additionally
 requires marker length and dictionary; these fields are hidden for checkerboards.
-The page defaults to the operator-confirmed 10-by-7 checkerboard with 15 mm
-squares and camera `head`; these are editable, not inferred from the image.
-Change them when using another board. No session starts automatically.
-ChArUco marker size and dictionary still require explicit entry. Confirm the lens model first.
+The page defaults to the operator-confirmed new ChArUco board: 6-by-4 squares,
+22.5 mm squares, 16.5 mm markers, `DICT_4X4_50`, camera `head`. These are editable,
+not inferred from the image. Change them when using another board; the old 10-by-7
+15 mm plain checkerboard is historical evidence, not the current default.
+No session starts automatically. Confirm printed scale and lens model first.
 
 For example, a 10-by-7-square board with measured 15 mm squares has 9-by-6 inner
 corners (54 total) and uses `square_size_m=0.015`. The ordinary checkerboard spec is:

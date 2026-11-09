@@ -294,9 +294,13 @@ class CalibrationViewTests(unittest.IsolatedAsyncioTestCase):
                 await view.toggle_preview()
                 self.assertNotIn('src',view.image.props)
                 self.assertFalse(work.root.exists())
-                self.assertEqual(view.board_type.value,'checkerboard')
+                self.assertEqual(view.board_type.value,'charuco')
                 self.assertEqual((view.camera.value,view.nx.value,view.ny.value,view.square.value),
-                                 ('head',10,7,.015))
+                                 ('head',6,4,.0225))
+                self.assertEqual((view.marker.value,view.dictionary.value),(.0165,'DICT_4X4_50'))
+                self.assertTrue(view.marker.visible)
+                view.board_type.value='checkerboard'
+                view.board_fields()
                 self.assertFalse(view.marker.visible)
                 self.assertFalse(view.import_upload.enabled)
                 view.board_type.value='charuco'
@@ -339,15 +343,20 @@ class CalibrationViewTests(unittest.IsolatedAsyncioTestCase):
                            coverage_fraction=.3,sharpness=100,objects=[],pixels=[])
             with patch('openarm_runtime.camera_intrinsics.detect',return_value=detection):
                 for _ in range(8):await view.capture()
-                self.assertTrue(view.phase_button.visible)
+                self.assertFalse(view.phase_button.visible)  # Guide recommends 16, not 8.
                 self.assertFalse(view.solve_button.enabled)
                 self.assertIn('54',view.messages['capture'].text)
+                self.assertEqual(view.guide_title.text,'上边靠近相机')
+                self.assertIn('9 / 16',view.guide_number.text)
+                self.assertEqual(view.role.value,'fit')
                 await view.next_phase()
                 self.assertEqual(view.role.value,'validation')
+                self.assertEqual(view.guide_title.text,'检查 · 正面稍远')
                 for _ in range(3):await view.capture()
+                self.assertEqual(view.guide_title.text,'检查 · 左下角靠近')
             self.assertTrue(view.solve_button.enabled)
-            self.assertEqual(view.fit_count.text,'8 / 8')
-            self.assertEqual(view.validation_count.text,'3 / 3')
+            self.assertEqual(view.fit_count.text,'8 / 16')
+            self.assertEqual(view.validation_count.text,'3 / 4')
             self.assertEqual(len(view.samples.rows),11)
             work.result=dict(fit_rms_px=.2,validation_rms_px=.3,quality_issues=['边缘覆盖不足'])
             work.state='estimated'
@@ -375,6 +384,8 @@ class CalibrationViewTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('开始标定',view.messages['capture'].text)
             self.assertEqual(view.messages['start'].text,'')
             await view.start()
+            first_guide=view.guide_image.content
+            self.assertEqual(view.guide_title.text,'正面 · 中心')
             entered,release=threading.Event(),threading.Event()
             def fail(*args):
                 entered.set()
@@ -397,6 +408,7 @@ class CalibrationViewTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('再拍一张',view.messages['capture'].text)
             self.assertTrue(view.capture_button.enabled)
             self.assertEqual(len(work.samples),0)
+            self.assertEqual(view.guide_image.content,first_guide)
             with patch.object(work,'capture',side_effect=OSError('Connection refused')):
                 await view.capture()
             self.assertIn('重连画面',view.messages['capture'].text)

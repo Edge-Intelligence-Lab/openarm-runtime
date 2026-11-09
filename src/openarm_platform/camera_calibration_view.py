@@ -8,6 +8,7 @@ import time
 class CalibrationView:
     def __init__(self, workspace):
         from nicegui import ui
+        from .calibration_pose_guide import FIT_POSES, pose_svg
         self.ui, self.workspace = ui, workspace
         self.owner = ui.context.client.id
         self.working = False
@@ -17,6 +18,7 @@ class CalibrationView:
         self.messages = {}
         self.phase = 'fit'
         self._rendered_evidence = None
+        self._rendered_guide = None
         ui.colors(primary='#36735a')
         ui.add_css('''
           body {background:#f6f8f5;color:#263d32}
@@ -38,6 +40,8 @@ class CalibrationView:
           .cal-settings .q-expansion-item__content {padding:12px 0}
           .cal-field {width:100%}
           .cal-end {color:#65756c;font-size:.8rem}
+          .cal-pose-guide {width:100%;display:grid;grid-template-columns:160px minmax(0,1fr);gap:14px;align-items:center;background:#f0f5f1;border-radius:8px;padding:12px}
+          .cal-pose-guide svg {width:100%;height:auto;display:block}
           @media(max-width:800px) {.cal-layout{grid-template-columns:1fr}.cal-workspace{padding:16px;gap:16px}.cal-panel{padding:16px}}
         ''')
         with ui.column().classes('cal-workspace'):
@@ -65,6 +69,13 @@ class CalibrationView:
                     with ui.column().classes('w-full gap-2') as self.capture_panel:
                         self.role = ui.radio({'fit':'标定照片', 'validation':'检查照片'}, value='fit',
                                              on_change=self.role_changed).props('inline data-testid=calibration-role')
+                        with ui.element('div').classes('cal-pose-guide') as self.guide_panel:
+                            self.guide_image = ui.html('',sanitize=False).props('data-testid=calibration-pose-image')
+                            with ui.column().classes('gap-1'):
+                                self.guide_number = ui.label('').classes('cal-caption').props('data-testid=calibration-pose-number')
+                                self.guide_title = ui.label('').classes('font-semibold').props('data-testid=calibration-pose-title')
+                                self.guide_instruction = ui.label('').classes('text-sm').props('data-testid=calibration-pose-instruction')
+                        ui.label('左右按预览画面看；蓝边向镜头靠近，不是在画面里转圈。示意不代表姿态已验收。').classes('cal-caption')
                         self.capture_button = ui.button('拍摄一张', on_click=self.capture).classes('cal-main-button w-full').props('no-caps data-testid=calibration-capture')
                         self.feedback('capture')
                     with ui.expansion('已拍照片 · 0 张').classes('w-full') as self.samples_expansion:
@@ -74,35 +85,42 @@ class CalibrationView:
                         ui.label('只有检测成功的照片才计入进度；原图均保留。').classes('cal-caption')
                 with ui.column().classes('cal-panel'):
                     self.stage_label = ui.label('准备').classes('text-lg font-semibold')
-                    self.board_summary = ui.label('普通棋盘 · 10 × 7 格 · 15 mm').classes('cal-caption')
+                    self.board_summary = ui.label('ChArUco · 6 × 4 格 · 22.5 mm').classes('cal-caption')
                     self.next_hint = ui.label('参数已填好。先开始，再拍摄。').classes('text-sm')
                     with ui.column().classes('w-full gap-3') as self.progress_panel:
                         with ui.row().classes('w-full justify-between items-center'):
                             ui.label('标定照片').classes('text-sm')
-                            self.fit_count = ui.label('0 / 8').classes('cal-count').props('data-testid=calibration-fit-count')
+                            self.fit_count = ui.label('0 / 16').classes('cal-count').props('data-testid=calibration-fit-count')
                         self.fit_progress = ui.linear_progress(0,show_value=False).classes('w-full')
                         with ui.row().classes('w-full justify-between items-center'):
                             ui.label('检查照片').classes('text-sm')
-                            self.validation_count = ui.label('0 / 3').classes('cal-count').props('data-testid=calibration-validation-count')
+                            self.validation_count = ui.label('0 / 4').classes('cal-count').props('data-testid=calibration-validation-count')
                         self.validation_progress = ui.linear_progress(0,show_value=False).classes('w-full')
                         self.phase_button = ui.button('下一步：拍检查照片', on_click=self.next_phase).props('outline no-caps data-testid=calibration-next-phase').classes('w-full')
                         self.solve_button = ui.button('计算标定结果', on_click=self.solve).props('no-caps data-testid=calibration-solve').classes('cal-main-button w-full')
                         self.solve_hint = ui.label('至少需要 8 张标定照片和 3 张检查照片。').classes('cal-caption')
                         self.feedback('solve')
                     with ui.expansion('棋盘与相机设置').classes('cal-settings') as self.settings:
-                        self.board_type = ui.radio({'checkerboard':'普通棋盘', 'charuco':'ChArUco'}, value='checkerboard',
+                        self.board_type = ui.radio({'checkerboard':'普通棋盘', 'charuco':'ChArUco'}, value='charuco',
                             on_change=self.board_fields).props('inline data-testid=calibration-board-type')
                         self.camera = ui.input('相机 ID', value='head',on_change=self.settings_changed).classes('cal-field').props('data-testid=calibration-camera')
                         with ui.row().classes('w-full flex-nowrap'):
-                            self.nx = ui.number('横向格数',value=10,min=4,max=40,precision=0,on_change=self.settings_changed).classes('w-1/2')
-                            self.ny = ui.number('纵向格数',value=7,min=4,max=40,precision=0,on_change=self.settings_changed).classes('w-1/2')
-                        self.square = ui.number('格长（米）',value=.015,min=0,max=.2,precision=6,on_change=self.settings_changed).classes('cal-field')
+                            self.nx = ui.number('横向格数',value=6,min=4,max=40,precision=0,on_change=self.settings_changed).classes('w-1/2')
+                            self.ny = ui.number('纵向格数',value=4,min=4,max=40,precision=0,on_change=self.settings_changed).classes('w-1/2')
+                        self.square = ui.number('格长（米）',value=.0225,min=0,max=.2,precision=6,on_change=self.settings_changed).classes('cal-field')
                         ui.label('填黑白方格总数，不是内部角点数。15 mm = 0.015 m。').classes('cal-caption')
-                        self.marker = ui.number('Marker 长（米）',min=0,max=.2,precision=6).classes('cal-field')
+                        self.marker = ui.number('Marker 长（米）',value=.0165,min=0,max=.2,precision=6).classes('cal-field')
                         self.dictionary_label = ui.label('打印板字典').classes('cal-caption')
-                        self.dictionary = ui.select(['DICT_4X4_50','DICT_5X5_100','DICT_6X6_250']).classes('cal-field').props('data-testid=calibration-dictionary')
+                        self.dictionary = ui.select(['DICT_4X4_50','DICT_5X5_100','DICT_6X6_250'],value='DICT_4X4_50').classes('cal-field').props('data-testid=calibration-dictionary')
                         self.settings_hint = ui.label('开始后锁定参数。换板请先结束本次标定。').classes('cal-caption')
                     with ui.expansion('怎么拍得更准').classes('w-full'):
+                        ui.label('四种倾斜方向 · 蓝边靠近镜头').classes('text-sm font-semibold')
+                        with ui.element('div').style('display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%'):
+                            for index in (4,6,8,10):
+                                with ui.column().classes('gap-1'):
+                                    ui.label(FIT_POSES[index].title).classes('text-sm')
+                                    ui.html(pose_svg(FIT_POSES[index]),sanitize=False).classes('w-full')
+                        ui.label('这里只是预览；不会改变当前步骤。停稳再拍，尽量保持整板入镜。').classes('cal-caption')
                         ui.label('覆盖画面中心和四角，改变远近，并向左右、上下倾斜。不要只拍同一个正面姿态。').classes('text-sm')
                         ui.label('保持棋盘平整、完整入镜，避免反光与模糊。拍摄期间不改相机焦距、分辨率或安装位置。').classes('text-sm')
                     self.cancel_button = ui.button('结束本次标定', on_click=self.ask_cancel).props('flat no-caps data-testid=calibration-cancel').classes('w-full')
@@ -168,6 +186,25 @@ class CalibrationView:
         self.message('capture','')
         self.capture_hint.set_text('检查照片不参与拟合；换几个位置和倾角再拍。' if self.phase == 'validation'
                                    else '让整块棋盘入镜，停稳后拍摄。多换位置、远近和倾角。')
+        if self.last_status:
+            self.update_guide(self.last_status)
+
+    def update_guide(self, status):
+        from .calibration_pose_guide import guide_step, pose_svg
+        samples = status['samples'] if status['mine'] else []
+        accepted = sum(s['role']==self.role.value for s in samples)
+        key=(self.role.value,accepted)
+        if self._rendered_guide == key:
+            return
+        self._rendered_guide = key
+        pose,index,total,complete = guide_step(self.role.value,accepted)
+        kind='标定' if self.role.value=='fit' else '检查'
+        self.guide_image.set_content(pose_svg(pose))
+        self.guide_number.set_text(f'下一张 · {kind} {index} / {total}' if not complete else f'{kind}照片已收录 {accepted} 张')
+        self.guide_title.set_text(pose.title if not complete else '建议拍摄数量已完成')
+        self.guide_instruction.set_text(pose.instruction if not complete else
+            '点击「下一步：拍检查照片」。数量够不代表姿态覆盖已合格。' if self.role.value=='fit' else
+            '可以计算结果；检查照片不会参与内参拟合。')
 
     async def next_phase(self):
         self.role.value = 'validation'
@@ -276,7 +313,7 @@ class CalibrationView:
         sample = await self.action('capture',self.workspace.capture,self.role.value,pending='正在取图并检测棋盘…')
         if sample:
             role = '检查照片' if sample['role'] == 'validation' else '标定照片'
-            self.message('capture',f'已收录一张{role} · 检测到 {len(sample["detection"]["corner_ids"])} 个角点。换个位置再拍。','success')
+            self.message('capture',f'已收录一张{role} · 检测到 {len(sample["detection"]["corner_ids"])} 个角点。请按上方提示摆下一张。','success')
 
     async def solve(self):
         self.confirm.value = False
@@ -327,6 +364,7 @@ class CalibrationView:
     async def refresh(self):
         status = await asyncio.to_thread(self.workspace.status,self.owner)
         self.last_status = status
+        self.update_guide(status)
         state, mine = status['state'], status['mine']
         active = state in ('collecting','estimated')
         owned = mine and active
@@ -344,12 +382,14 @@ class CalibrationView:
             '拍摄标定照片' if owned else '已保存' if state=='saved' and mine else '准备')
         if active and not mine:
             hint = '请回到开始标定的原窗口继续。此页不能接管或结束他人的会话；原窗口关闭后约 2 分钟释放。'
+        elif owned and fit>=16 and validation>=4:
+            hint = '建议数量已完成。可计算结果，再检查误差与参数稳定性。'
+        elif owned and fit>=16:
+            hint = '标定照片已收录 16 张。请切换用途，再按图拍 4 张检查照片。'
         elif owned and ready:
-            hint = '数量已满足。可计算结果，也可以继续补拍不同姿态。'
-        elif owned and fit>=8:
-            hint = '标定照片已够。接着拍至少 3 张独立检查照片。'
+            hint = '已达最低求解数量，建议继续按图采满 16 + 4 张；计数不代表姿态已合格。'
         elif owned:
-            hint = '先拍至少 8 张。覆盖中心、四角，并改变倾角。'
+            hint = '按图拍 16 张标定照片，再拍 4 张检查照片。成功收录后提示下一张。'
         elif mine and state=='saved':
             hint = '候选已保存，未自动启用。需要重新采集时可开始新标定。'
         elif state=='cancelled':
@@ -362,6 +402,7 @@ class CalibrationView:
         self.start_button.set_enabled(not active and not busy)
         self.start_button.set_text('重新开始标定' if state in ('saved','cancelled') else '开始标定')
         self.capture_panel.set_visibility(owned)
+        self.capture_hint.set_visibility(not owned)
         self.samples_expansion.set_visibility(bool(samples))
         self.board_summary.set_visibility(not active or mine)
         self.settings.set_visibility(not active or mine)
@@ -371,16 +412,16 @@ class CalibrationView:
         self.capture_button.set_text('正在检测…' if self.active_action=='capture' else '拍摄一张')
         self.capture_button.props('loading' if self.active_action=='capture' else '',remove='' if self.active_action=='capture' else 'loading')
         self.role.set_enabled(owned and not busy)
-        self.phase_button.set_visibility(owned and fit>=8 and self.role.value!='validation' and not ready)
+        self.phase_button.set_visibility(owned and fit>=16 and self.role.value!='validation' and validation<4)
         self.phase_button.set_enabled(not busy)
         self.solve_button.set_enabled(owned and ready and not busy)
         self.solve_button.set_text('正在计算…' if self.active_action=='solve' else '计算标定结果')
-        self.solve_hint.set_text('数量达到最低要求；姿态覆盖仍需检查。' if ready else
+        self.solve_hint.set_text('已达最低 8 + 3 张；建议按图拍满 16 + 4 张。姿态覆盖仍需检查。' if ready else
             f'还需 {max(0,8-fit)} 张标定照片、{max(0,3-validation)} 张检查照片。')
-        self.fit_count.set_text(f'{fit} / 8')
-        self.validation_count.set_text(f'{validation} / 3')
-        self.fit_progress.value = min(fit/8,1)
-        self.validation_progress.value = min(validation/3,1)
+        self.fit_count.set_text(f'{fit} / 16')
+        self.validation_count.set_text(f'{validation} / 4')
+        self.fit_progress.value = min(fit/16,1)
+        self.validation_progress.value = min(validation/4,1)
         for field in (self.camera,self.board_type,self.nx,self.ny,self.square,self.marker,self.dictionary):
             field.set_enabled(not active and not busy)
         self.settings_hint.set_text('参数已锁定。需修改时，先结束本次标定。' if active else '换棋盘时在这里修改；开始后锁定参数。')
