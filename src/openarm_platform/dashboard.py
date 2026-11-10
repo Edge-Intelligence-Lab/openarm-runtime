@@ -21,6 +21,8 @@ def service_ready(state):
 
 
 def ssh_command(local_port, remote_port, remote_host='127.0.0.1'):
+    if remote_host == '0.0.0.0':
+        remote_host = '127.0.0.1'
     return f'ssh -N -L {int(local_port)}:{remote_host}:{int(remote_port)} USER@WORKSTATION'
 
 

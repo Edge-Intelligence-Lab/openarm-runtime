@@ -59,15 +59,29 @@ and an explicit client allowlist to the external platform profile, for example:
 
 Merge these fields into the existing profile; do not replace its services or
 evidence paths. The example permits one laptop. A trusted `/24` subnet may be
-configured instead; broader networks, wildcard binds, public addresses and
+configured instead; broader allowlists, public bind addresses and
 arbitrary hostnames are rejected. The LAN address is printed at startup. Restart
 the same `run_platform.py` process after editing configuration; no system service
 or separate camera launch is required. An address change requires updating the
 profile. Internal camera/control ports remain loopback-only behind the gateway.
 
+To explicitly listen on **all IPv4 interfaces without any source-IP restriction**:
+
+```json
+{"host":"0.0.0.0","allowed_clients":[]}
+```
+
+This is a separate, unrestricted-source opt-in. It admits LAN, VPN and publicly
+routed clients wherever the workstation is reachable; there is no application
+login. OS firewalls and routers are not changed. Open the workstation's actual
+IP in the browser, not `0.0.0.0`. Normal direct access via any IPv4 address is
+accepted. Exact same-origin checks and IP-literal Host validation remain to
+block cross-site requests and DNS rebinding; they are not client-IP allowlists.
+SSH-forward localhost origins remain supported. The default stays loopback-only.
+
 This is **not authentication**: permitted network clients can access the operator
 console. Use only a trusted wired/private LAN; do not forward this port to the
-Internet or expose it on public/shared Wi-Fi. The peer filter reads the actual
+Internet or expose it on public/shared Wi-Fi. When configured, the peer filter reads the actual
 socket address, not `X-Forwarded-For`. Host checks reject unconfigured names and
 wrong LAN ports; mutation and WebSocket requests still require exact same origin.
 This entry uses HTTP, not encryption. Prefer the existing SSH tunnel when the

@@ -4,6 +4,7 @@ No arbitrary destination can be supplied by a browser. Application connections
 keep their original lifetimes; stopping the gateway closes every proxy socket.
 """
 import asyncio
+import ipaddress
 import json
 import re
 from urllib.parse import urlsplit
@@ -103,11 +104,19 @@ def rewrite_location(value, prefix, port):
     return value
 
 
-def valid_host(headers, allowed_hosts=LOCAL_HOSTS):
+def is_ipv4_host(value):
+    try:
+        ipaddress.IPv4Address(value)
+        return True
+    except (ValueError,TypeError):
+        return False
+
+
+def valid_host(headers, allowed_hosts=LOCAL_HOSTS, allow_ip_hosts=False):
     """Accept the local SSH-forward origin, never arbitrary DNS hostnames."""
     try:
         host = urlsplit('http://' + headers.get('host', ''))
-        return (host.hostname in allowed_hosts
+        return ((host.hostname in allowed_hosts or (allow_ip_hosts and is_ipv4_host(host.hostname)))
                 and host.username is None and host.password is None
                 and not host.path and not host.query and not host.fragment
                 and (host.port is None or 1 <= host.port <= 65535))
@@ -115,9 +124,9 @@ def valid_host(headers, allowed_hosts=LOCAL_HOSTS):
         return False
 
 
-def same_origin(connection, allowed_hosts=LOCAL_HOSTS):
+def same_origin(connection, allowed_hosts=LOCAL_HOSTS, allow_ip_hosts=False):
     scheme = 'https' if connection.scope.get('scheme') in ('https', 'wss') else 'http'
-    return (valid_host(connection.headers,allowed_hosts)
+    return (valid_host(connection.headers,allowed_hosts,allow_ip_hosts)
             and connection.headers.get('origin') == scheme + '://' + connection.headers.get('host', ''))
 
 
@@ -172,6 +181,7 @@ class Gateway:
 
     def __init__(self, config):
         self.allowed_hosts = (*LOCAL_HOSTS,config.host)
+        self.allow_ip_hosts = config.host == '0.0.0.0'
         self.mapping = routes(config)
         self.session = None
         self._responses = set()
@@ -221,7 +231,7 @@ class Gateway:
         from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
         from starlette.requests import ClientDisconnect
 
-        if not valid_host(request.headers,self.allowed_hosts):
+        if not valid_host(request.headers,self.allowed_hosts,self.allow_ip_hosts):
             return JSONResponse({'error': 'Use an allowed platform address'}, status_code=403)
         try:
             route = _target(request, self.mapping)
@@ -229,7 +239,7 @@ class Gateway:
             route = None
         if route is None:
             return JSONResponse({'error': 'Unknown module route'}, status_code=404)
-        if request.method not in ('GET', 'HEAD') and not same_origin(request,self.allowed_hosts):
+        if request.method not in ('GET', 'HEAD') and not same_origin(request,self.allowed_hosts,self.allow_ip_hosts):
             return JSONResponse({'error': 'Same-origin request required'}, status_code=403)
         prefix, port, target = route
         if self._closed or self.session is None:
@@ -337,7 +347,7 @@ class Gateway:
                 # The browser can disappear between receive() and close().
                 pass
 
-        if not same_origin(downstream,self.allowed_hosts):
+        if not same_origin(downstream,self.allowed_hosts,self.allow_ip_hosts):
             await close_browser(1008)
             return
         try:

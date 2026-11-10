@@ -67,8 +67,8 @@ def validate(config):
         host = ipaddress.IPv4Address(config.host)
         networks = tuple(ipaddress.ip_network(n,strict=True) for n in config.allowed_clients)
     except (ValueError,TypeError) as exc:
-        raise ValueError('host must be a literal private IPv4 address; allowed_clients must be canonical CIDRs') from exc
-    if str(host) != '127.0.0.1':
+        raise ValueError('host must be a literal IPv4 address; allowed_clients must be canonical CIDRs') from exc
+    if str(host) not in ('127.0.0.1','0.0.0.0'):
         if not any(host in net for net in private) or not networks:
             raise ValueError('LAN access requires an explicit RFC1918 bind address and allowed_clients')
     if any(n.version!=4 or n.prefixlen<24 or not any(n.subnet_of(p) for p in private) for n in networks):

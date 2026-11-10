@@ -10,7 +10,7 @@ import socket
 from urllib.parse import urlsplit
 
 from .services import ServiceManager
-from .proxy import LOCAL_HOSTS
+from .proxy import LOCAL_HOSTS, is_ipv4_host
 
 
 class Coordinator:
@@ -76,6 +76,7 @@ class LocalBoundary:
     def __init__(self, app, host='127.0.0.1', allowed_clients=(), port=8888):
         self.app = app
         self.allowed_hosts = (*LOCAL_HOSTS,host)
+        self.allow_ip_hosts = host == '0.0.0.0'
         self.lan_host = host if host != '127.0.0.1' else None
         self.port = port
         self.client_networks = tuple(ipaddress.ip_network(n) for n in allowed_clients)
@@ -89,17 +90,19 @@ class LocalBoundary:
         host = hosts[0] if len(hosts) == 1 else ''
         try:
             address = urlsplit('http://' + host)
-            valid = (bool(host) and address.hostname in self.allowed_hosts
+            valid = (bool(host) and (address.hostname in self.allowed_hosts or
+                     (self.allow_ip_hosts and is_ipv4_host(address.hostname)))
                      and address.netloc == host and not address.username and not address.password
                      and not address.path and not address.query and not address.fragment)
             _ = address.port  # Reject malformed port syntax.
-            if address.hostname == self.lan_host and address.port != self.port:
+            if (address.hostname == self.lan_host or
+                    (self.allow_ip_hosts and address.hostname not in LOCAL_HOSTS)) and address.port != self.port:
                 valid = False
         except ValueError:
             valid = False
         unsafe = scope['type'] == 'websocket' or scope.get('method') not in ('GET', 'HEAD', 'OPTIONS')
         client_allowed = True
-        if self.lan_host:
+        if self.client_networks:
             try:
                 peer = ipaddress.ip_address(scope['client'][0])
                 client_allowed = peer.is_loopback or any(peer in n for n in self.client_networks)
@@ -267,7 +270,10 @@ def serve(config, *, attach_only=False):
         ))
         print(f'OpenArm Platform: http://{config.host}:{config.port}', flush=True)
         if config.host != '127.0.0.1':
-            print('LAN access has no login: use only a trusted private network. Allowed clients: '+', '.join(config.allowed_clients),flush=True)
+            if config.host == '0.0.0.0':
+                print('All IPv4 interfaces are exposed without login. Open the workstation IP, not 0.0.0.0. Source IP restrictions: '+(', '.join(config.allowed_clients) or 'NONE'),flush=True)
+            else:
+                print('LAN access has no login: use only a trusted private network. Allowed clients: '+', '.join(config.allowed_clients),flush=True)
         print(f'服务日志：{config.log_dir} · Ctrl+C 关闭本次启动的服务', flush=True)
         try:
             server.run(sockets=[listener])
