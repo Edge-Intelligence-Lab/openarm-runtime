@@ -1,5 +1,6 @@
 """External launch configuration for the local platform; no hardware imports."""
 from dataclasses import dataclass, field, replace
+import ipaddress
 import json
 from pathlib import Path
 import sys
@@ -47,6 +48,8 @@ class PlatformConfig:
     policy_record_root: Path = field(default_factory=lambda: Path.home() / 'openarm-episodes')
     collection_root: Path = field(default_factory=lambda: Path.home() / 'openarm-collection')
     calibration_root: Path = field(default_factory=lambda: Path.home() / '.local/share/openarm-calibration')
+    host: str = '127.0.0.1'
+    allowed_clients: tuple[str, ...] = ()
 
     @property
     def services(self):
@@ -57,6 +60,19 @@ class PlatformConfig:
 
 
 def validate(config):
+    if not isinstance(config.host,str):
+        raise ValueError('host must be a literal IPv4 string')
+    private = tuple(ipaddress.ip_network(n) for n in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16'))
+    try:
+        host = ipaddress.IPv4Address(config.host)
+        networks = tuple(ipaddress.ip_network(n,strict=True) for n in config.allowed_clients)
+    except (ValueError,TypeError) as exc:
+        raise ValueError('host must be a literal private IPv4 address; allowed_clients must be canonical CIDRs') from exc
+    if str(host) != '127.0.0.1':
+        if not any(host in net for net in private) or not networks:
+            raise ValueError('LAN access requires an explicit RFC1918 bind address and allowed_clients')
+    if any(n.version!=4 or n.prefixlen<24 or not any(n.subnet_of(p) for p in private) for n in networks):
+        raise ValueError('allowed_clients must be RFC1918 IPv4 networks of /24 or narrower')
     ports = [config.port]
     for page in config.services:
         ports.extend((page.port, *page.extra_ports))
@@ -69,9 +85,12 @@ def validate(config):
 
 def load_config(path=None):
     data = {} if path is None else json.loads(Path(path).expanduser().read_text())
-    if not isinstance(data, dict) or set(data) - {'title', 'port', 'services', 'support', 'log_dir', 'policy_record_root', 'collection_root', 'calibration_root'}:
+    if not isinstance(data, dict) or set(data) - {'title', 'port', 'services', 'support', 'log_dir', 'policy_record_root', 'collection_root', 'calibration_root', 'host', 'allowed_clients'}:
         raise ValueError('Invalid platform configuration fields')
     base = Path.cwd() if path is None else Path(path).expanduser().resolve().parent
+    clients=data.get('allowed_clients',[])
+    if not isinstance(clients,list) or any(not isinstance(n,str) for n in clients):
+        raise ValueError('allowed_clients must be a list of CIDR strings')
     entries = data.get('services', {})
     if not isinstance(entries, dict) or set(entries) - {x[0] for x in DEFAULTS}:
         raise ValueError('services must contain only control, teleop, tactile and vision')
@@ -134,4 +153,5 @@ def load_config(path=None):
     return validate(PlatformConfig(valid_port(data.get('port', 8888)), tuple(pages),
                                    path_value(data.get('log_dir', '~/.local/state/openarm-platform')),
                                    tuple(auxiliary), title, path_value(data.get('policy_record_root', '~/openarm-episodes')), collection_root,
-                                   path_value(data.get('calibration_root', '~/.local/share/openarm-calibration'))))
+                                   path_value(data.get('calibration_root', '~/.local/share/openarm-calibration')),
+                                   data.get('host','127.0.0.1'),tuple(clients)))

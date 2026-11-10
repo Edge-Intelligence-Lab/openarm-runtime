@@ -103,11 +103,11 @@ def rewrite_location(value, prefix, port):
     return value
 
 
-def valid_host(headers):
+def valid_host(headers, allowed_hosts=LOCAL_HOSTS):
     """Accept the local SSH-forward origin, never arbitrary DNS hostnames."""
     try:
         host = urlsplit('http://' + headers.get('host', ''))
-        return (host.hostname in LOCAL_HOSTS
+        return (host.hostname in allowed_hosts
                 and host.username is None and host.password is None
                 and not host.path and not host.query and not host.fragment
                 and (host.port is None or 1 <= host.port <= 65535))
@@ -115,9 +115,9 @@ def valid_host(headers):
         return False
 
 
-def same_origin(connection):
+def same_origin(connection, allowed_hosts=LOCAL_HOSTS):
     scheme = 'https' if connection.scope.get('scheme') in ('https', 'wss') else 'http'
-    return (valid_host(connection.headers)
+    return (valid_host(connection.headers,allowed_hosts)
             and connection.headers.get('origin') == scheme + '://' + connection.headers.get('host', ''))
 
 
@@ -171,6 +171,7 @@ class Gateway:
     """
 
     def __init__(self, config):
+        self.allowed_hosts = (*LOCAL_HOSTS,config.host)
         self.mapping = routes(config)
         self.session = None
         self._responses = set()
@@ -220,15 +221,15 @@ class Gateway:
         from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
         from starlette.requests import ClientDisconnect
 
-        if not valid_host(request.headers):
-            return JSONResponse({'error': 'Use a localhost SSH forward'}, status_code=403)
+        if not valid_host(request.headers,self.allowed_hosts):
+            return JSONResponse({'error': 'Use an allowed platform address'}, status_code=403)
         try:
             route = _target(request, self.mapping)
         except (UnicodeError, ValueError):
             route = None
         if route is None:
             return JSONResponse({'error': 'Unknown module route'}, status_code=404)
-        if request.method not in ('GET', 'HEAD') and not same_origin(request):
+        if request.method not in ('GET', 'HEAD') and not same_origin(request,self.allowed_hosts):
             return JSONResponse({'error': 'Same-origin request required'}, status_code=403)
         prefix, port, target = route
         if self._closed or self.session is None:
@@ -336,7 +337,7 @@ class Gateway:
                 # The browser can disappear between receive() and close().
                 pass
 
-        if not same_origin(downstream):
+        if not same_origin(downstream,self.allowed_hosts):
             await close_browser(1008)
             return
         try:

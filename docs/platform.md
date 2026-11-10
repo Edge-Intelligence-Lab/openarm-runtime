@@ -47,6 +47,34 @@ The platform's `--port` option changes the workstation entry port.
 
 ## Replace separate launches
 
+### Trusted LAN access (explicit opt-in)
+
+The default entry remains loopback-only. To open the same unified page from a
+laptop on a trusted LAN, add the workstation's **actual assigned private IPv4**
+and an explicit client allowlist to the external platform profile, for example:
+
+```json
+{"host":"192.168.1.20","allowed_clients":["192.168.1.10/32"]}
+```
+
+Merge these fields into the existing profile; do not replace its services or
+evidence paths. The example permits one laptop. A trusted `/24` subnet may be
+configured instead; broader networks, wildcard binds, public addresses and
+arbitrary hostnames are rejected. The LAN address is printed at startup. Restart
+the same `run_platform.py` process after editing configuration; no system service
+or separate camera launch is required. An address change requires updating the
+profile. Internal camera/control ports remain loopback-only behind the gateway.
+
+This is **not authentication**: permitted network clients can access the operator
+console. Use only a trusted wired/private LAN; do not forward this port to the
+Internet or expose it on public/shared Wi-Fi. The peer filter reads the actual
+socket address, not `X-Forwarded-For`. Host checks reject unconfigured names and
+wrong LAN ports; mutation and WebSocket requests still require exact same origin.
+This entry uses HTTP, not encryption. Prefer the existing SSH tunnel when the
+network is untrusted. Never disable origin checks or expose the internal ports
+as a workaround. With a LAN bind, an SSH forward must target that bind address
+rather than remote loopback; the dashboard generates the appropriate target.
+
 1. Stop the old standalone control, teleoperation and sensing processes that
    this platform will manage, using their normal stop procedures.
 2. Copy and configure the example below once, then start only the platform.
@@ -148,7 +176,8 @@ framework migration. Existing profiles can be used after installing `[platform]`
   killed. Other owned service groups have bounded terminate/kill cleanup. No
   service automatically restarts after failure.
 
-The server binds only `127.0.0.1`. The gateway routes only to configured local
+The server binds `127.0.0.1` by default; the explicit trusted-LAN option above
+changes only the unified entry address. The gateway routes only to configured local
 services. REST selections require same-origin JSON; dashboard actions use the
 NiceGUI session. Upstream mutation and WebSocket requests are restricted to the
 platform origin. Commands and private paths are not exposed by the public

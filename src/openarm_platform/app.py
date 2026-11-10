@@ -3,6 +3,7 @@
 Importing this module is passive and does not require the platform extra.
 """
 import asyncio
+import ipaddress
 from contextlib import asynccontextmanager
 import json
 import socket
@@ -72,8 +73,12 @@ class LocalBoundary:
     # hostname, not arbitrary .localhost names; origin/port equality stays below.
     allowed_hosts = LOCAL_HOSTS
 
-    def __init__(self, app):
+    def __init__(self, app, host='127.0.0.1', allowed_clients=(), port=8888):
         self.app = app
+        self.allowed_hosts = (*LOCAL_HOSTS,host)
+        self.lan_host = host if host != '127.0.0.1' else None
+        self.port = port
+        self.client_networks = tuple(ipaddress.ip_network(n) for n in allowed_clients)
 
     async def __call__(self, scope, receive, send):
         if scope['type'] not in ('http', 'websocket'):
@@ -88,15 +93,24 @@ class LocalBoundary:
                      and address.netloc == host and not address.username and not address.password
                      and not address.path and not address.query and not address.fragment)
             _ = address.port  # Reject malformed port syntax.
+            if address.hostname == self.lan_host and address.port != self.port:
+                valid = False
         except ValueError:
             valid = False
         unsafe = scope['type'] == 'websocket' or scope.get('method') not in ('GET', 'HEAD', 'OPTIONS')
-        if (not valid or (origins and origins != ['http://' + host])
+        client_allowed = True
+        if self.lan_host:
+            try:
+                peer = ipaddress.ip_address(scope['client'][0])
+                client_allowed = peer.is_loopback or any(peer in n for n in self.client_networks)
+            except (ValueError,TypeError,KeyError):
+                client_allowed = False
+        if (not valid or not client_allowed or (origins and origins != ['http://' + host])
                 or (unsafe and origins != ['http://' + host])):
             if scope['type'] == 'websocket':
                 await send({'type': 'websocket.close', 'code': 1008})
             else:
-                body = b'{"error":"Use a localhost address and same-origin requests"}'
+                body = b'{"error":"Use an allowed address, client network and same-origin request"}'
                 await send({'type': 'http.response.start', 'status': 403,
                             'headers': [(b'content-type', b'application/json'),
                                         (b'content-length', str(len(body)).encode())]})
@@ -167,7 +181,7 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
     app.state.camera_calibration = calibration
     app.state.coordinator = coordinator
     app.state.shutdown_error = None
-    app.add_middleware(LocalBoundary)
+    app.add_middleware(LocalBoundary,host=config.host,allowed_clients=config.allowed_clients,port=config.port)
 
     @app.get('/api/config')
     async def configuration():
@@ -236,7 +250,7 @@ def serve(config, *, attach_only=False):
     # Bind first: an occupied entry port must never trigger child/device startup.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind(('127.0.0.1', config.port))
+        listener.bind((config.host, config.port))
         listener.listen(128)
         app = create_app(config, attach_only=attach_only)
 
@@ -247,11 +261,13 @@ def serve(config, *, attach_only=False):
                 await super().shutdown(sockets=sockets)
 
         server = PlatformServer(uvicorn.Config(
-            app, host='127.0.0.1', port=config.port, workers=1, reload=False,
+            app, host=config.host, port=config.port, workers=1, reload=False,
             access_log=False, proxy_headers=False, server_header=False,
             ws_max_size=64 * 1024 * 1024, timeout_graceful_shutdown=10,
         ))
-        print(f'OpenArm Platform: http://127.0.0.1:{config.port}', flush=True)
+        print(f'OpenArm Platform: http://{config.host}:{config.port}', flush=True)
+        if config.host != '127.0.0.1':
+            print('LAN access has no login: use only a trusted private network. Allowed clients: '+', '.join(config.allowed_clients),flush=True)
         print(f'服务日志：{config.log_dir} · Ctrl+C 关闭本次启动的服务', flush=True)
         try:
             server.run(sockets=[listener])

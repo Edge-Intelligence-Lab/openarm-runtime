@@ -20,8 +20,8 @@ def service_ready(state):
     return state.get('reachable') is True and state.get('state') != 'error'
 
 
-def ssh_command(local_port, remote_port):
-    return f'ssh -N -L {int(local_port)}:127.0.0.1:{int(remote_port)} USER@WORKSTATION'
+def ssh_command(local_port, remote_port, remote_host='127.0.0.1'):
+    return f'ssh -N -L {int(local_port)}:{remote_host}:{int(remote_port)} USER@WORKSTATION'
 
 
 @dataclass
@@ -132,7 +132,7 @@ class Dashboard:
                     tag(ui.button(icon='close', on_click=self.connection_dialog.close)
                         .props('flat round dense aria-label="关闭连接设置"'), 'connection-close')
                 ui.label('在本机直接打开平台。使用其他电脑时，只需保持这一条 SSH 转发开启。').classes('connection-description')
-                self.command = tag(ui.label(ssh_command(self.config.port, self.config.port)).classes('ssh-command'), 'ssh-command')
+                self.command = tag(ui.label(ssh_command(self.config.port, self.config.port,self.config.host)).classes('ssh-command'), 'ssh-command')
                 tag(ui.button('复制命令', icon='content_copy', on_click=self.copy_command).props('no-caps'), 'copy-command')
                 ui.label('画面和实时连接都通过这一个入口。设备是否正常，请查看模块内的状态。').classes('connection-note')
         with tag(ui.dialog(), 'confirm-dialog') as self.confirm_dialog:
@@ -150,7 +150,7 @@ class Dashboard:
     async def initialize(self):
         await self.client.connected()
         location = await self.ui.run_javascript('({port: location.port || (location.protocol === "https:" ? "443" : "80"), hash: location.hash.slice(1)})')
-        self.command.set_text(ssh_command(location['port'], self.config.port))
+        self.command.set_text(ssh_command(location['port'], self.config.port,self.config.host))
         await self.poll()
         if location.get('hash') in self.pages:
             await self.select(location['hash'])
@@ -171,7 +171,7 @@ class Dashboard:
         # SSH local and remote ports may intentionally differ.
         try:
             port = await self.ui.run_javascript('location.port || (location.protocol === "https:" ? "443" : "80")')
-            self.command.set_text(ssh_command(port, self.config.port))
+            self.command.set_text(ssh_command(port, self.config.port,self.config.host))
         except (TimeoutError, RuntimeError):
             pass
         self.connection_dialog.open()
