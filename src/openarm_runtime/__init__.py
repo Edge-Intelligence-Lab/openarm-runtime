@@ -5,5 +5,5 @@ from .control import hold_arm
 from .calibration import calibrate_arm
 from .telemetry import MotorRange, MotorState, ArmConnection
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 __all__ = ["Profile", "hold_arm", "calibrate_arm", "MotorRange", "MotorState", "ArmConnection"]

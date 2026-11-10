@@ -37,6 +37,11 @@ including exception cleanup, rather than copying implementation details.
 Record actual hardware checks separately in [validation](docs/validation.md).
 Keep device configuration, calibration, logs and cached assets outside Git.
 
+The explicit operator-approved exception is the sanitized, installation-specific
+head-camera baseline in `configs/cameras/`. Keep it versioned and hash-bound;
+raw calibration evidence and personal machine/device configuration stay external.
+See `configs/cameras/README.md` for its scope and coordinate/validity contract.
+
 ## API changes
 
 Keep examples and [the API guide](docs/api.md) aligned with public exports.

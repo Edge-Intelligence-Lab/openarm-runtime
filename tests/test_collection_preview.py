@@ -73,6 +73,21 @@ class CollectionPreviewTests(unittest.TestCase):
         self.assertFalse(browser.live(now_ns=104_000_000_000)[0]['fresh'])
         self.assertFalse(browser.live(now_ns=99_000_000_000)[0]['fresh'])
 
+    def test_atomic_update_during_read_is_not_mistaken_for_future_status(self):
+        directory=self.root/'.runtime';directory.mkdir()
+        snapshot=dict(schema='openarm.collection-status/1',publisher='one',
+            updated_wall_time_ns=100_000_000_000,state='recording',streams={})
+        atomic_json(directory/'one.json',snapshot)
+        clock=[99_000_000_000]
+        def read_after_publish(path):
+            clock[0]=100_000_000_000
+            return dict(snapshot)
+        with patch('openarm_platform.collection.read_json',side_effect=read_after_publish), \
+             patch('openarm_platform.collection.time.time_ns',side_effect=lambda:clock[0]):
+            browser=CollectionBrowser(self.root)
+            self.assertTrue(browser.live()[0]['fresh'])
+            self.assertFalse(browser.live(now_ns=99_000_000_000)[0]['fresh'])
+
     def test_archive_is_read_only_and_preserves_target_feedback_distinction(self):
         path=fixture(self.root)
         before={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in path.iterdir() if p.is_file()}
