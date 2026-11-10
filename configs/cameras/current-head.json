@@ -1,0 +1,10 @@
+{
+  "schema": "openarm.camera-baseline-selection.v1",
+  "installation_id": "openarm-v2-head-astra-pro",
+  "camera": "head",
+  "version": "20261110-v1",
+  "path": "head-astra-pro/20261110-v1.json",
+  "sha256": "2e33f3028e7e320f43b319b2ed0c7c60079ae8a4e1abab9e80b7732dfcfa9df4",
+  "automatic_device_selection": false,
+  "automatic_hardware_activation": false
+}

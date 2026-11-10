@@ -1,0 +1,156 @@
+{
+  "schema": "openarm.camera-baseline.v1",
+  "version": "20261110-v1",
+  "installation_id": "openarm-v2-head-astra-pro",
+  "scope": "this_installation_only_not_factory_calibration",
+  "selection": "operator_accepted_baseline_after_offline_simulation_visual_review",
+  "independently_physically_verified": false,
+  "automatically_activate_hardware": false,
+  "camera": {
+    "name": "head",
+    "model": "Astra Pro RGB",
+    "image_size": [1280, 720],
+    "image_geometry": "native_no_transform",
+    "camera_model": "pinhole",
+    "distortion_model": "opencv_5",
+    "pixel_coordinates": "x right, y down; native OpenCV image pixels",
+    "matrix": [
+      [1007.3759323261551, 0.0, 648.5412534547582],
+      [0.0, 1005.894776547822, 383.16680235990856],
+      [0.0, 0.0, 1.0]
+    ],
+    "distortion": [
+      0.056219346631710014,
+      0.38021308615459354,
+      -0.00025174339295446564,
+      -0.0006971512942885714,
+      -1.2772477652608862
+    ],
+    "distortion_order": ["k1", "k2", "p1", "p2", "k3"],
+    "intrinsics_version": "20261110-v1"
+  },
+  "extrinsics": {
+    "transform_name": "base_from_camera",
+    "base_frame": "world",
+    "base_frame_semantics": "root of the pinned robot URDF, not a surveyed room frame",
+    "camera_frame": "head_optical",
+    "camera_axes": {"x": "right", "y": "down", "z": "forward"},
+    "units": "m",
+    "equation": "p_base = base_from_camera @ p_camera; homogeneous column vectors",
+    "base_from_camera": [
+      [-0.0032977033174182158, -0.8940526827815002, 0.44794969088507086, 0.0567064761899711],
+      [-0.9995586812198728, 0.016171713676243114, 0.02491823578748592, 0.008392649899155363],
+      [-0.029522329698338623, -0.4476698293251111, -0.8937114500560048, 0.7890478461241447],
+      [0.0, 0.0, 0.0, 1.0]
+    ],
+    "mujoco_optical_rotation": [
+      [1.0, 0.0, 0.0],
+      [0.0, -1.0, 0.0],
+      [0.0, 0.0, -1.0]
+    ],
+    "mujoco_rotation_equation": "R_base_mujoco_camera = R_base_opencv_camera @ mujoco_optical_rotation"
+  },
+  "robot": {
+    "model": "OpenArm V2",
+    "calibration_arm": "left",
+    "tool_frame": "openarm_left_ee_base_link",
+    "kinematics_sha256": "79bd7cbe2ad98b46115f06f10c74934508eef7b93f86ffbd03a8ef5957c34af3",
+    "kinematics": {
+      "urdf_sha256": "56bd506b9686f5e472b143684dcd045c4e30783d27e1266f6f480a49f01b8bd8",
+      "joints": [
+        "openarm_left_joint1", "openarm_left_joint2", "openarm_left_joint3",
+        "openarm_left_joint4", "openarm_left_joint5", "openarm_left_joint6", "openarm_left_joint7"
+      ],
+      "signs": [1, 1, 1, 1, 1, 1, 1],
+      "offsets": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "locked": {
+        "openarm_left_finger_joint1": 0.0,
+        "openarm_left_finger_joint2": 0.0,
+        "openarm_right_joint1": 0.0,
+        "openarm_right_joint2": 0.0,
+        "openarm_right_joint3": 0.0,
+        "openarm_right_joint4": 0.0,
+        "openarm_right_joint5": 0.0,
+        "openarm_right_joint6": 0.0,
+        "openarm_right_joint7": 0.0,
+        "openarm_right_finger_joint1": 0.0,
+        "openarm_right_finger_joint2": 0.0
+      },
+      "frame": "openarm_left_ee_base_link",
+      "tcp": [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+      ],
+      "encoder_limit_tolerance_rad": 0.008726646259971648
+    }
+  },
+  "calibration_fixture": {
+    "scope": "source_calibration_mount_only_not_a_permanent_robot_TCP",
+    "board_spec": {
+      "type": "charuco",
+      "squares_x": 6,
+      "squares_y": 4,
+      "square_size_m": 0.0225,
+      "marker_size_m": 0.0165,
+      "dictionary": "DICT_4X4_50"
+    },
+    "tool_from_board": [
+      [0.012978869663394066, -0.015578883162274959, -0.9997944025356797, 0.02576363703886798],
+      [-0.994733529809124, 0.10146488385157795, -0.014494206375876229, 0.0697281229014311],
+      [0.10166982647640022, 0.9947171335331477, -0.01417993793557265, -0.2155277765898749],
+      [0.0, 0.0, 0.0, 1.0]
+    ]
+  },
+  "validation": {
+    "semantics": "within_session_consistency_not_absolute_accuracy_certification",
+    "fit": {
+      "samples": 12,
+      "rms_translation_m": 0.0026779717784152853,
+      "rms_rotation_rad": 0.01101961287392166,
+      "max_translation_m": 0.004164814363000099,
+      "max_rotation_rad": 0.018684684838539144
+    },
+    "validation": {
+      "samples": 4,
+      "rms_translation_m": 0.0033823555165824223,
+      "rms_rotation_rad": 0.013590291281268891,
+      "max_translation_m": 0.004937677744859555,
+      "max_rotation_rad": 0.019009805973595566
+    },
+    "rms_acceptance_limits": {"translation_m": 0.005, "rotation_rad": 0.03},
+    "intrinsics_fit_rms_px": 0.25797656123975005,
+    "intrinsics_validation_rms_px": 0.23441138018504198,
+    "timing_contract": "stationary_bracket_not_exposure_synchronization",
+    "exposure_timestamp_known": false,
+    "simulation_review": "16 recorded joint poses replayed; 4 held-out real/rendered views visually reviewed without camera adjustment"
+  },
+  "provenance": {
+    "group_id": "ef9692cd4c164350ac70b9c4b7de5466",
+    "intrinsics_session_id": "56db91e3fa30433d96a875a6852a5b7c",
+    "intrinsics_file_sha256": "378b052ca6a7c9032b1be8fafcad3fc971e21433e848b63a7f92742b007bb407",
+    "estimate_file_sha256": "d1198852e0c9d48867013f67c9dfdc9262119a03d56a700d9adc967fcee90d88",
+    "observations_file_sha256": "d543fc150c7d45c29023946105f6b49e6fcdfc97e8b5a33ec9c69c88a3f6e650",
+    "observations_canonical_json_sha256": "c24c91717829aaaab9019f933d40a7bb91e8a7fcb90683716acebd60fd3438ec",
+    "session_file_sha256": "173d79ed96f5d31c0da9f9fd2938453f2f8546994888b734cea57200a799e667",
+    "route_canonical_json_sha256": "ae8534b147cec562f0f685770d10a34096ec9c9a8196308b177966430919c62f",
+    "raw_evidence_storage": "external; original PNGs and feedback retained, not embedded in this repository"
+  },
+  "validity_conditions": [
+    "Use only this approved physical camera/lens and rigid mounting instance; model name alone is not a device identity check.",
+    "Keep focus and zoom unchanged. Refocusing or replacing the camera/lens requires intrinsics review.",
+    "Use native 1280x720 pixels. Cropping, resizing, rotation or binning requires an explicit corresponding intrinsic transform.",
+    "Moving the camera relative to the robot base invalidates these extrinsics.",
+    "Use the pinned robot coordinate frame, kinematic geometry and joint sign/offset conventions.",
+    "Raw images use the OpenCV distortion coefficients. Ideal simulation must be compared to images undistorted with the same K.",
+    "MuJoCo scene-world placement is not the robot base frame; apply the scene's declared base/world transform separately."
+  ],
+  "limitations": [
+    "Intrinsics corner coverage near image edges, especially the bottom edge, was limited; edge distortion is less constrained.",
+    "This is an operator-accepted baseline, not independently surveyed physical metric accuracy.",
+    "Stationary acquisition intervals are qualified; exact exposure-time synchronization and moving-scene accuracy are not certified.",
+    "Right-arm current joint angles, table geometry, gripper transmission, lighting and background are not calibrated by this result.",
+    "The board transform applies only to its original rigid mount and must not be reused after re-clamping."
+  ]
+}

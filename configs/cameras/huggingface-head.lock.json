@@ -1,0 +1,10 @@
+{
+  "schema": "tacpilot.artifact-lock.v1",
+  "repo_id": "tacpilot/tacpilot",
+  "repo_type": "model",
+  "revision": "b712883b433a5d7005c38d2d99820dc70fedb3c8",
+  "manifest": {
+    "path": "releases/v0.3.1/manifest.json",
+    "sha256": "b066d7ec2e5f386ffabe4b139fd5d4360a3128e84fcd561df92c996853c9aa4b"
+  }
+}

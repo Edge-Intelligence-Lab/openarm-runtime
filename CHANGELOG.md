@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.2 — 2026-11-10
+
+- Publish the operator-approved, installation-specific Astra Pro RGB head-camera
+  baseline `20261110-v1`: native 1280×720 intrinsics/distortion, metric
+  `base_from_camera`, coordinate conventions, robot FK identity and provenance.
+  A SHA-256-pinned current selection prevents silent parameter replacement.
+- Bind the same bytes to the existing Hugging Face OpenArm supplied-gripper model
+  in asset package `v0.3.1`. The immutable lock and camera scene entry reproduce
+  `head_calibrated` without modifying original meshes, task cameras or model/data
+  payloads. Retain physical-calibration limitations and the original raw evidence
+  externally; this is not independent absolute-accuracy certification.
+- Add dependency-free configuration integrity tests and include the baseline and
+  asset lock in source distributions. No motor behavior, device selection,
+  live-service deployment or automatic hardware activation changes.
+
 ## 0.8.1 — 2026-11-01
 
 - Add same-origin collection visualization at `/#collection`: fresh/stale
