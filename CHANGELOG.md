@@ -14,6 +14,9 @@
 - Add dependency-free configuration integrity tests and include the baseline and
   asset lock in source distributions. No motor behavior, device selection,
   live-service deployment or automatic hardware activation changes.
+- Fix a read-only collection-preview freshness race by sampling wall time after
+  reading an atomic status snapshot. Preserve explicit-time checks and stale/future
+  rejection; add a deterministic concurrent-publication regression test.
 
 ## 0.8.1 — 2026-11-01
 
