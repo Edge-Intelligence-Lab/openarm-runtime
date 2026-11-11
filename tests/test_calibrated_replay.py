@@ -44,7 +44,6 @@ class CalibratedCameraTests(unittest.TestCase):
         import tempfile
         from pathlib import Path
         import hashlib
-        import cv2
         import numpy as np
         import mujoco as mj
         from openarm_simulation.world import build_model

@@ -4,7 +4,6 @@ import json
 import math
 from pathlib import Path
 import tempfile
-import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -40,7 +39,7 @@ def states(now, q=0):
 class ModelTests(unittest.TestCase):
     def setUp(self):
         try:
-            import pinocchio
+            import pinocchio  # noqa: F401 - verify the optional native library imports
         except ImportError:
             self.skipTest("optional gravity extra")
         self.temp = tempfile.TemporaryDirectory()
@@ -170,7 +169,7 @@ class BilateralTests(unittest.TestCase):
 
     def test_both_sides_identical_statics_independent_state_and_profile_routing(self):
         try:
-            import pinocchio
+            import pinocchio  # noqa: F401 - verify the optional native library imports
         except ImportError:
             self.skipTest("optional gravity extra")
         self.save()

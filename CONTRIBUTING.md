@@ -21,9 +21,9 @@ For offline camera calibration, add `--extra calibration` (and `--extra platform
 for the web page). Run `python -m unittest discover -s tests -p 'test_camera*.py'`
 and `python -m unittest discover -s tests -p 'test_platform_camera*.py'`.
 These use known synthetic projections, indexed board images and borrowed fake
-capture snapshots, never physical cameras or CAN. CI checks ChArUco capability
-and executes these tests from the installed wheel rather than accepting a fully
-skipped calibration suite. Keep real camera identities and board measurements
+capture snapshots, never physical cameras or CAN. For local installed-wheel
+checks, verify ChArUco capability rather than accepting a fully skipped
+calibration suite. Keep real camera identities and board measurements
 in external profiles/evidence, not fixtures claiming hardware validation.
 
 When developing the runtime together with another application, install this
@@ -68,7 +68,8 @@ an editable install is for joint development, not a reproducible deployment.
 3. Commit and push. Tag the release commit `vX.Y.Z` and push that tag. The release
    workflow validates the tag/version, builds the distributions without running
    tests, then publishes a GitHub release with the changelog, wheel, source
-   distribution and SHA256 checksums from that same commit.
+   distribution from that same commit. Version identity is the Git tag/commit;
+   no separate file-hash manifest is published.
 4. Update downstream pins explicitly after acceptance. A release does not require
    restarting a user's live hardware services.
 

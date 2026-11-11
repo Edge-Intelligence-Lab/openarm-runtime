@@ -3,7 +3,7 @@ import copy
 import threading
 import time
 
-from .recording import Episode, plain, review_episode
+from .recording import Episode, review_episode
 
 
 class Collection:

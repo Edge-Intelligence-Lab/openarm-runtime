@@ -14,7 +14,6 @@ from openarm_policy import (ActionChunk, ActionSpec, Observation, SensorSample, 
                             ObservationBuffer, SimulatedRobot, ClassicRobot, PolicySession,
                             SessionConfig, EpisodeRecorder, replay_observations)
 from openarm_policy.adapters import HoldPolicy
-from openarm_policy.inference import InferenceWorker
 from openarm_policy.contracts import Context
 from openarm_runtime.config import Profile
 

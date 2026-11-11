@@ -1,7 +1,6 @@
 """Wrist UI reuses intrinsic solving without robot ownership or head evidence."""
 import asyncio
 import hashlib
-import json
 from pathlib import Path
 import tempfile
 import unittest

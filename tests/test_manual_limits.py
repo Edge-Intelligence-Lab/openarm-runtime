@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from test_arm import FakeBus
 from openarm_runtime.arm import ArmHold
 from openarm_runtime.config import Profile
-from openarm_runtime.limits import joint_bounds_deg, JOINT_VELOCITY_RAD_S
+from openarm_runtime.limits import joint_bounds_deg
 from openarm_runtime.panel import MotionSession
 from openarm_runtime.telemetry import IDS, MotorRange
 

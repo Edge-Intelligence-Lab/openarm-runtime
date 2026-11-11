@@ -63,11 +63,11 @@ Cartesian policy execution is an explicit geometry-declared capability, not join
 relabeling; trained-policy hardware acceptance remains separate.
 Offline [head/wrist hand-eye calibration](docs/camera-calibration.md) fits measured,
 synchronized board/FK observations without opening devices or installing estimates.
-The unified platform's **头部相机标定** (`/#camera_calibration`) adds ChArUco and
-ordinary-checkerboard pinhole intrinsics, native lossless borrowed frames, held-out image checks and
-explicit candidate saving; install `.[platform,calibration]` from this checkout.
-Real-time external-pose capture stays disabled until trusted exposure/FK pairing
-exists. See the [web workflow and verification boundaries](docs/camera-calibration.md#unified-web-workflow-head-camera-only).
+The unified platform's **相机标定** (`/#camera_calibration`) includes head and wrist
+intrinsics, native borrowed frames, held-out checks and explicit candidate saving;
+install `.[platform,calibration]`. Optional head alignment borrows the existing
+teleoperator's measured feedback; no autonomous motion is added. See the
+[web workflow and verification boundaries](docs/camera-calibration.md).
 An optional fixed preparation can connect from actual feedback, move to task-ready,
 open the gripper and hand off to the model in the same operator-started episode.
 Shared bilateral gravity configuration and per-arm feedforward apply beneath all
@@ -86,10 +86,10 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 
 # Core: state types, software mapping and control API; no GUI or hardware SDK.
-pip install "openarm-runtime @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
+pip install "openarm-runtime @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.9.0"
 
 # Serial leader readout, with a browser-based virtual robot.
-pip install "openarm-runtime[leader,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
+pip install "openarm-runtime[leader,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.9.0"
 ```
 
 Extras compose freely:
@@ -114,7 +114,7 @@ project's environment. With uv, declare and lock the dependency directly:
 
 ```sh
 # Run in your own Python 3.12 project.
-uv add "openarm-runtime[leader,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
+uv add "openarm-runtime[leader,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.9.0"
 ```
 
 **Modify the runtime while developing your application:** clone the source
@@ -167,7 +167,7 @@ configure the machine once using [platform.example.json](platform.example.json),
 then launch:
 
 ```sh
-python -m pip install "openarm-runtime[platform] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
+python -m pip install "openarm-runtime[platform] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.9.0"
 openarm-runtime platform --profile ~/.config/openarm-runtime/platform.json
 ```
 
@@ -322,7 +322,7 @@ ssh -N -L 8890:127.0.0.1:8890 -L 8891:127.0.0.1:8891 your-workstation
 Video is available starting with v0.3.0:
 
 ```sh
-python -m pip install "openarm-runtime[video] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
+python -m pip install "openarm-runtime[video] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.9.0"
 # No cameras or vendor SDK required; clearly labelled SIMULATION.
 openarm-runtime video --simulate --port 5004
 ```
@@ -440,7 +440,7 @@ examples in `examples/`. [Changelog](CHANGELOG.md) · [Provenance](ORIGIN.md) ·
 Paxini IP-M2324-Core (68 points) with the single-channel USB serial converter:
 
 ```sh
-pip install "openarm-runtime[tactile,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
+pip install "openarm-runtime[tactile,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.9.0"
 openarm-runtime tactile --device /dev/serial/by-id/YOUR_CONVERTER --device-id 2 --port 8891
 ```
 

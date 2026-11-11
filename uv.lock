@@ -997,7 +997,7 @@ source = { git = "https://github.com/enactic/openarm_can.git?subdirectory=python
 
 [[package]]
 name = "openarm-runtime"
-version = "0.8.2"
+version = "0.9.0"
 source = { editable = "." }
 
 [package.optional-dependencies]

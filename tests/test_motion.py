@@ -38,7 +38,8 @@ class MotionTests(unittest.TestCase):
         m = self.motion()
         random.seed(17)
         for i in range(2000):
-            goal = math.radians(random.choice((-90, -10, 0, 10, 90))) if i % 10 == 0 else goal
+            if i % 10 == 0:
+                goal = math.radians(random.choice((-90, -10, 0, 10, 90)))
             previous_q, previous_v = dict(m.positions), dict(m.velocities)
             q = m.step(dict.fromkeys(IDS, goal), 5 if i % 100 < 50 else .1, .05)
             for mid in IDS:

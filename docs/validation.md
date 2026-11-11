@@ -1,5 +1,24 @@
 # Hardware validation
 
+## v0.9.0 offline release checks — 2026-11-11
+
+- Fresh Python 3.12 core-only wheel environment: 565 tests ran successfully,
+  including 208 optional-dependency/external-asset skips. Passive imports and
+  CLI help were checked outside the checkout with installed-package assertions.
+- A separate installed-wheel environment with platform, calibration, Cartesian,
+  simulation and viewer extras plus Rerun: 561 passed, 4 skipped and 347 subtests
+  passed. One upstream Starlette TestClient deprecation warning remains.
+- Model-adapter checks in the existing inference environment: 73 passed,
+  1 skipped and 112 subtests passed. No training or checkpoint changes were made.
+- Wheel/sdist contents include the new browser resources and RGB helper source;
+  camera configuration contains only HF references, with no parameter copies.
+  The native RGB helper passed a C++17 syntax/warning check without opening devices.
+- Software-only policy CLI smoke checks completed in both summary and full
+  recording modes. Required optional libraries resolved in an isolated environment;
+  runtime gains, feedback checks and disable cleanup remain covered by fake devices.
+- These are Linux/offline checks, not new physical-motion or macOS acceptance.
+  No real cameras, CAN/serial devices, motors or live hardware services were started.
+
 ## Leader calibration and dual-arm following — 2026-10-31
 
 The operator saved both natural-reference poses and gripper endpoints, then

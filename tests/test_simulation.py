@@ -116,7 +116,6 @@ class SimulationDeviceTests(unittest.TestCase):
             world.close()
 
     def test_camera_mode_and_timing_cannot_cross_simulation_boundary(self):
-        from unittest.mock import Mock
         from openarm_platform.calibration_source import CalibrationCamera
         from openarm_runtime.stationary_calibration import digest
         evidence={'source':'test'}
@@ -124,7 +123,7 @@ class SimulationDeviceTests(unittest.TestCase):
             qualification_evidence_sha256=digest(evidence),png_sha256='1'*64,
             earliest_s=9.9,latest_s=9.95,qualification='synthetic_test')
         meta=dict(acquisition=acquisition,png_sha256='1'*64,received_at_s=10.,simulation=True)
-        with tempfile.TemporaryDirectory() as root:
+        with tempfile.TemporaryDirectory():
             auto=CalibrationCamera(15003,{'camera_name':'head'},{},simulation=False,clock=lambda:10.)
             auto.fetch=lambda *a:(b'png',meta)
             with patch('openarm_platform.calibration_source.decode_frame',return_value=None):

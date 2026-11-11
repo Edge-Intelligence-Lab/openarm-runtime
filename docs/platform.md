@@ -14,7 +14,7 @@ The platform is available from v0.6.0. In a Python 3.12 environment, install
 the optional platform dependencies and configure the machine as described below:
 
 ```sh
-python -m pip install "openarm-runtime[platform] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.1"
+python -m pip install "openarm-runtime[platform] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.9.0"
 openarm-runtime platform --profile ~/.config/openarm-runtime/platform.json
 ```
 

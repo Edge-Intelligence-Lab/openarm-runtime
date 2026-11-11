@@ -1,5 +1,4 @@
 """Optional absolute goal decoding and pre-start contract binding; no hardware."""
-import hashlib
 import importlib.util
 import json
 import math

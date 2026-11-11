@@ -1,7 +1,6 @@
 """Model composition, released ACT semantics and Cartesian dispatch, no hardware."""
 from dataclasses import replace
 import importlib.util
-import math
 import hashlib
 from pathlib import Path
 import subprocess

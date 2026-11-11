@@ -2,13 +2,12 @@
 from dataclasses import replace
 import math
 import json
-import time
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from openarm_policy import Context, Observation, SensorSample, SimulatedRobot, PolicySession, SessionConfig, ActionChunk
+from openarm_policy import Context, Observation, SensorSample, SimulatedRobot, PolicySession, ActionChunk
 from openarm_policy.preparation import FixedJointPreparation
 
 

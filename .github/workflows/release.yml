@@ -34,7 +34,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
-          sha256sum *.whl *.tar.gz > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" *.whl *.tar.gz SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" *.whl *.tar.gz \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "$GITHUB_REF_NAME" --notes-file ../release-notes.md

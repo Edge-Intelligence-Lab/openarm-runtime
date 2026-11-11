@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.9.0 — 2026-11-11
+
+- Integrate registered model loading, sample prediction, explicit policy execution
+  and model-input previews into the existing platform. Preserve exclusive motion
+  ownership, external-service boundaries, watchdogs and verified disable cleanup.
+- Add calibrated native head/wrist image preprocessing, ACT observation variants,
+  absolute Cartesian action contracts, feedback-paced execution and opt-in causal
+  temporal aggregation. Keep model/input/output contract validation without custom
+  checkpoint or adapter content-hash metadata.
+- Add head and left/right wrist intrinsic workspaces, continuous video previews,
+  and a separate operator-driven head-alignment workspace using existing
+  teleoperation feedback. No autonomous pose search or new motor owner is added.
+- Add explicit passive MuJoCo platform simulation and offline calibrated replay,
+  isolated from physical transports, services and output directories. Add optional
+  kernel-timestamped Linux RGB capture and asynchronous latest-frame observation.
+- Add opt-in bounded tracking torque integration, disabled by default. Preserve
+  gains, firmware-range checks, feedback validity and failure/disable resets.
+- Default policy CLI recording to compact `summary.json`; use `--record-mode full`
+  for observation/action archives. Optional Rerun recording retains configured
+  real observations and submitted commands, not reconstructed missing history.
+- Replace local camera parameters and the old head-only asset lock with
+  `configs/cameras/current.json`: shared HF repository/commit plus head/wrist paths.
+  Consumers must fetch parameters externally and pass explicit paths. The wrist
+  file is not two independently measured full calibrations.
+- Retain v0.8.2's collection-status freshness fix. Keep tag-only release packaging
+  without automatic test jobs; publish wheel/source archives without a custom
+  checksum manifest. Remove unused calibration code and imports, and ignore editor
+  screenshots without deleting them. No new physical-motion acceptance is claimed.
+
 ## 0.8.2 — 2026-11-10
 
 - Publish the operator-approved, installation-specific Astra Pro RGB head-camera
