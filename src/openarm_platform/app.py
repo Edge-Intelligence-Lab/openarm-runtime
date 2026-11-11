@@ -7,6 +7,7 @@ import ipaddress
 from contextlib import asynccontextmanager
 import json
 import socket
+import re
 from urllib.parse import urlsplit
 
 from .services import ServiceManager
@@ -54,6 +55,10 @@ class Coordinator:
         if self.attach_only or name in self.builtin_pages:
             return await self.status()
         return self.with_builtin(await self._call(self.manager.activate, name))
+
+    async def deactivate(self,name):
+        if self.attach_only:raise ValueError('只读模式不能停止服务')
+        return self.with_builtin(await self._call(self.manager.deactivate,name))
 
     def begin_shutdown(self):
         self.closing = True
@@ -138,7 +143,7 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
     """
     try:
         from fastapi import FastAPI, Request
-        from starlette.responses import JSONResponse
+        from starlette.responses import JSONResponse, Response, FileResponse, StreamingResponse
         from .proxy import Gateway
         if with_ui:
             from nicegui import ui
@@ -151,20 +156,44 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
     coordinator = Coordinator(manager, attach_only=attach_only,
                               builtin_pages=(p.id for p in config.pages if p.path))
     gateway = Gateway(config)
+    simulation=None
+    if config.simulation_profile is not None:
+        from .simulation import create_simulation
+        simulation=create_simulation(config)
     from .policy import PolicyPreview
     preview = PolicyPreview(config.policy_record_root)
+    from .model_workspace import ModelWorkspace
+    models = ModelWorkspace(config.model_catalog, config.policy_record_root / 'deployment',
+                            manager, readonly=attach_only, simulation=simulation is not None)
+    models.video_preview_port = next((p.port for p in config.services if p.id == 'vision'), None)
+    if models.port is not None and models.port in {config.port, *[p.port for p in config.services],
+                                                 *[port for p in config.services for port in p.extra_ports]}:
+        raise ValueError('模型推理端口必须与平台和其他服务端口不同')
     from .camera_calibration import CalibrationWorkspace
     calibration = CalibrationWorkspace(config.calibration_root,
         next(p.port for p in config.pages if p.id == 'vision'))
+    calibration.simulation_backend=simulation
+    calibration.teleop_calibration = config.teleop_calibration_profile is not None
+    calibration.alignment_coordinator=coordinator
+    calibration.attach_only=attach_only
 
     @asynccontextmanager
     async def lifespan(app):
         try:
             await gateway.start()
+            if simulation is not None:
+                await asyncio.to_thread(simulation.start)
             await coordinator.start()
             yield
         finally:
+            # Model execution must release/disable through the existing CLI before
+            # the manager closes peer services. Never force-kill a hardware child.
             coordinator.begin_shutdown()
+            model_error = None
+            try:
+                await asyncio.to_thread(models.close)
+            except BaseException as exc:
+                model_error = exc
             calibration.close()
             try:
                 try:
@@ -173,22 +202,30 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
                     try:
                         await gateway.close()
                     finally:
-                        await coordinator.close()
+                        try:await coordinator.close()
+                        finally:
+                            if simulation is not None:await asyncio.to_thread(simulation.close)
             except BaseException as exc:
                 app.state.shutdown_error = exc
                 raise
+            if model_error is not None:
+                app.state.shutdown_error = model_error
+                raise model_error
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.gateway = gateway
     app.state.policy_preview = preview
+    app.state.model_workspace = models
     app.state.camera_calibration = calibration
     app.state.coordinator = coordinator
     app.state.shutdown_error = None
+    app.state.simulation_backend=simulation
     app.add_middleware(LocalBoundary,host=config.host,allowed_clients=config.allowed_clients,port=config.port)
 
     @app.get('/api/config')
     async def configuration():
         return JSONResponse(dict(title=config.title, port=config.port, attach_only=attach_only,
+                                 backend='mujoco' if simulation else 'hardware',simulation=simulation is not None,
                                  pages=[p.public() for p in config.pages]),
                             headers={'Cache-Control': 'no-store'})
 
@@ -198,6 +235,46 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
             return JSONResponse({'services': await coordinator.status()}, headers={'Cache-Control': 'no-store'})
         except RuntimeError as exc:
             return JSONResponse({'error': str(exc)}, status_code=503)
+
+    @app.get('/api/models')
+    async def model_status():
+        return JSONResponse(await asyncio.to_thread(models.snapshot), headers={'Cache-Control': 'no-store'})
+
+    @app.get('/api/models/input-image/{key}')
+    async def model_input_image(key: str):
+        with models.lock:
+            root = models.run_root
+        if root is None or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', key):
+            return Response(status_code=404)
+        path = root / 'episode/model-inputs' / (key+'.png')
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > 4_000_000:
+            return Response(status_code=404)
+        return Response(await asyncio.to_thread(path.read_bytes), media_type='image/png',
+                        headers={'Cache-Control': 'no-store'})
+
+    @app.get('/api/models/recording')
+    async def model_recording():
+        with models.lock:
+            root, running = models.run_root, models.process is not None
+        path = root / 'episode/recording.rrd' if root is not None else None
+        if running or path is None or not path.is_file() or path.is_symlink():
+            return Response(status_code=404)
+        return FileResponse(path, filename=root.name+'.rrd', media_type='application/octet-stream')
+
+    @app.get('/api/models/input-stream/{key}')
+    async def model_input_stream(key: str, run: str = ''):
+        from .model_stream import input_frames
+        with models.lock:
+            root = models.run_root
+        if root is None or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', key) or run and root.name != run:
+            return Response(status_code=404)
+        path = root/'episode/model-inputs'/(key+'.png')
+        if not path.is_file() or path.is_symlink():
+            return Response(status_code=404)
+        frames = input_frames(path, lambda: not models.closed and models.run_root == root
+                              and models.process is not None)
+        return StreamingResponse(frames, media_type='multipart/x-mixed-replace; boundary=frame',
+                                 headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
 
     @app.post('/api/select')
     async def select(request: Request):
@@ -224,17 +301,31 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
         from .collection_view import build_collection_view
         from .camera_calibration_view import build_camera_calibration_view
 
-        @ui.page('/camera-calibration', title='头部相机标定 · OpenArm')
+        @ui.page('/camera-calibration', title='相机标定 · OpenArm')
         async def camera_calibration_page():
             build_camera_calibration_view(calibration)
+
+        if simulation is not None:
+            from .simulation import build_simulation_view
+            @ui.page('/simulation/control',title='仿真机械臂 · OpenArm')
+            def simulation_control_page():
+                build_simulation_view(simulation,attach_only=attach_only)
+
+            @ui.page('/simulation/teleop',title='仿真遥操 · OpenArm')
+            def simulation_teleop_page():
+                ui.label('仿真模式 · 遥操尚未接入，不会连接主臂串口。')
+
+            @ui.page('/simulation/tactile',title='仿真触觉 · OpenArm')
+            def simulation_tactile_page():
+                ui.label('仿真模式 · 尚无触觉传感器模型，不提供伪造触觉值。')
 
         @ui.page('/collection', title='数采可视化 · OpenArm')
         async def collection_page():
             build_collection_view(config.collection_root)
 
-        @ui.page('/policy', title='策略可视化 · OpenArm')
+        @ui.page('/policy', title='模型与执行 · OpenArm')
         async def policy_page():
-            build_policy_view(preview)
+            build_policy_view(preview, models)
 
         async def dashboard():
             await build_dashboard(config, coordinator, attach_only=attach_only)

@@ -12,7 +12,8 @@ from .transport import Reader
 from .calibration import collect_stable
 
 
-def serve(asset_root, left, right, calibration, port=8890, *, control_profile=None, report_root=None, collection=None):
+def serve(asset_root, left, right, calibration, port=8890, *, control_profile=None, report_root=None, collection=None,
+          head_calibration_profile=None,head_calibration_root=None,head_video_port=5003):
     import numpy as np
     import viser
 
@@ -23,7 +24,8 @@ def serve(asset_root, left, right, calibration, port=8890, *, control_profile=No
     readers = {path: Reader(path) for path in (left, right)}
     lock = threading.RLock()
     teleop = None
-    server = viser.ViserServer(host="127.0.0.1", port=port, label="OpenArm 遥操作")
+    server = viser.ViserServer(host="127.0.0.1", port=port,
+        label="头部相机标定 · 主臂控制" if head_calibration_profile else "OpenArm 遥操作")
     if server.get_port() != port:
         server.stop()
         raise RuntimeError("Requested viewer port is occupied")
@@ -141,7 +143,8 @@ def serve(asset_root, left, right, calibration, port=8890, *, control_profile=No
             from openarm_runtime.teleoperation import attach
             teleop, refresh_teleop = attach(server, control_profile, mapping, readers, report_root,
                                            lock, lambda: busy, lambda: mapping.path.exists() and mapping.data == saved_data,
-                                           collection=collection)
+                                            collection=collection,head_calibration_profile=head_calibration_profile,
+                                            head_calibration_root=head_calibration_root,head_video_port=head_video_port)
         for reader in readers.values():
             reader.start()
         print(f"Leader virtual teleoperation http://127.0.0.1:{port}", flush=True)

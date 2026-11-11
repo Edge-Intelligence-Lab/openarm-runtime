@@ -47,6 +47,23 @@ class FakeBus:
 
 
 class ArmTests(unittest.TestCase):
+    def test_integral_enters_feedforward_and_clears_on_disable(self):
+        bus = FakeBus()
+        sent = []
+        def exchange(targets, kp, kd, ff):
+            sent.append(dict(ff))
+            return {mid: bus.state(mid) for mid in IDS}
+        bus.exchange = exchange
+        with patch('openarm_runtime.arm.time.sleep'):
+            with ArmHold(bus, lambda: False, Mock(), Mock(), tracking=True, integral={}) as arm:
+                arm.integral.previous = time.monotonic()-.05
+                arm.track(dict.fromkeys(IDS, .04))
+                self.assertGreater(sent[-1][7], 0.)
+                self.assertEqual(sent[-1][8], 0.)
+                self.assertEqual(arm.targets[7], .04)
+            self.assertTrue(all(v == 0 for v in arm.integral.values.values()))
+        self.assertFalse(bus.enabled)
+
     def test_collection_observer_separates_before_command_and_feedback(self):
         bus = FakeBus()
         samples = []

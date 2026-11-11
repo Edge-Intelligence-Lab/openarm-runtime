@@ -254,9 +254,9 @@ def load_gravity(path, *, side=None):
         ("mode", "limits_nm", "slew_nm_s", "ramp_s", "scale") if k in config})
 
 
-def prepare_gravity(profile, side, bus, preflight):
+def prepare_gravity(profile, side, bus, preflight, *, required=False):
     """Resolve and evaluate before multi-arm enable barriers."""
-    compensation = profile.make_gravity(side)
+    compensation = profile.make_gravity(side, required=True) if required else profile.make_gravity(side)
     if compensation is not None:
         from .telemetry import MotorState
         states = {mid: MotorState(**entry["state"]) for mid, entry in preflight.items()}

@@ -507,6 +507,23 @@ wheels = [
 ]
 
 [[package]]
+name = "glfw"
+version = "2.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b2/89/fa9cb2611314b84ffa68d76f154e1e508971d6e402b14bd2152684e35e5d/glfw-2.11.0.tar.gz", hash = "sha256:4bd3a462ed02ae25455dceaeb76d154faf08b48962c0cb2cf685419a34a71305", size = 36404, upload-time = "2026-10-16T20:18:53.75Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/65/c728be098d0a2fb1c81070386384640e577ec2db096e885d14ba8c3a0ffd/glfw-2.11.0-py2.py3-none-macosx_10_6_intel.whl", hash = "sha256:4f40b141657b014148893f3b8950906389f9d4d3b2bced41fbefcdcda776e9ad", size = 110341, upload-time = "2026-10-16T08:46:24.538Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/2c/dc36e841a6a0db69c19db71a8fb4bbb211924bcf587735caea8afdd230ed/glfw-2.11.0-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:7405d3e3041add442e40a15ef5a880178ff90f486d576a82e112240c66f59555", size = 107194, upload-time = "2026-10-16T08:46:25.797Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/ab/59bfd8fb895c28f7a7c3504307d73b3eb18b85ec53a7025f9463400c4699/glfw-2.11.0-py2.py3-none-manylinux2014_aarch64.whl", hash = "sha256:de02fcb11126242a27f5f711b31ab83ae4dfe3567caa32dc2380e1f6050c59f1", size = 235053, upload-time = "2026-10-16T08:46:27.1Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/09/e3a95b97b4b174686e1b0340f9ee5b283ed65bb7cc09089fb228d36c351b/glfw-2.11.0-py2.py3-none-manylinux2014_x86_64.whl", hash = "sha256:a08e1135d02c9408d7622db3d391e3e33e4187754ec45633e9a482c775f4846c", size = 247001, upload-time = "2026-10-16T08:46:28.442Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/36/ca10753be547d78250aed12532ec8839f19bbeb5adac11ee8153ef59ce4f/glfw-2.11.0-py2.py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:e2f6be6bb463f98b7468386ec2e5328ee5975800580c28816ec549b4c62825c4", size = 236068, upload-time = "2026-10-16T08:46:29.587Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/b2/ee7afd7e84bc1a8a490710c3c0a7ad472b57f17909549dc7400d17f19c8b/glfw-2.11.0-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:76484fae4a4ef0f778a05e02422ecbe6960ae23039087fe2e0ad9742ab8c7bbe", size = 248539, upload-time = "2026-10-16T08:46:30.8Z" },
+    { url = "https://files.pythonhosted.org/packages/be/b2/feb54341a0ad2c3a57ba462bcdef5543569a7d2a1b8751a9c46050c0e255/glfw-2.11.0-py2.py3-none-win32.whl", hash = "sha256:9aac61d97f71088b16322a4a75cdf72ac44ea3f1c4e7e326e5dd7c427e020903", size = 557704, upload-time = "2026-10-16T08:46:32.228Z" },
+    { url = "https://files.pythonhosted.org/packages/78/d6/b0d9d83177397c018efa3579c54990f8d9b3af17fdcf97b0e549609a0571/glfw-2.11.0-py2.py3-none-win_amd64.whl", hash = "sha256:bd39c1adb57b7273813e33b9768bed88d1ea656abfc914b4a6424ec0c5d62674", size = 564482, upload-time = "2026-10-16T08:46:34.015Z" },
+    { url = "https://files.pythonhosted.org/packages/03/29/5c890d0da8258c64ec7a2fb76eb4c9aebe89a38abf1aecd8683b0b4c40e6/glfw-2.11.0-py3-none-win_arm64.whl", hash = "sha256:b986dfb457d27852593686fd934c8808986ae2e4cae44ec1e8e89b1e46fc36ee", size = 174351, upload-time = "2026-10-16T08:46:35.244Z" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -825,6 +842,54 @@ wheels = [
 ]
 
 [[package]]
+name = "mujoco"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "glfw" },
+    { name = "mujoco-core" },
+    { name = "mujoco-studio" },
+    { name = "numpy" },
+    { name = "pyopengl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2d/5e/8592ff48ce4848a844030a4ad82004b9de9bc33e6bed55feb8c87baaeb84/mujoco-4.0.0.tar.gz", hash = "sha256:c503ff7003dd7dfee19b575aed6a409fb9bc15bf9f1c4053892c793e05b5edb3", size = 154838, upload-time = "2026-11-06T15:39:17.295Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/93/90/6a6b168225cb354d343e01cd272e526b6798fd957693e878a785c71a2fd2/mujoco-4.0.0-py3-none-any.whl", hash = "sha256:693a48af2b683c8613f750be66c69a3262014becb0f08674730c4d461a2f0a8d", size = 108599, upload-time = "2026-11-06T15:39:14.795Z" },
+]
+
+[[package]]
+name = "mujoco-core"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d6/50/5745a505dd14526bb13f71cbfab61d0382f2560256b127e74a007517f59e/mujoco_core-4.0.0.tar.gz", hash = "sha256:7300cc232f27ceb8694aa45b26c790667eebd4a06286156b49b9726e3bf1d7cf", size = 1847546, upload-time = "2026-11-06T15:35:43.954Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/be/f8/0a60ca5db2de881f9823bbca90e5672b98d0aa65acaeb7c05b0c26aba950/mujoco_core-4.0.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:7e8386c3f26b8a6e944b4698d2498877b5693971e598dec8954db8743e4cbb4b", size = 9916935, upload-time = "2026-11-06T15:33:52.982Z" },
+    { url = "https://files.pythonhosted.org/packages/93/5f/7d25e43da4704091bd9bf4740b29036ae5fc51339ba0b0cd35072ec4449c/mujoco_core-4.0.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:4f132a6ae0de32ebb56058f7d31f7a489226210882957014ba54d9289cf1a674", size = 8957659, upload-time = "2026-11-06T15:33:56.309Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/9c/87f0a0fac3f08f98e70ce04aefcf4f63bfe13475bcfa2c47aef5d56fd67b/mujoco_core-4.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1cea4f32972ade944fef7a9b586272a83352bf0c6404455d7ea56d7f9edaa136", size = 9681493, upload-time = "2026-11-06T15:33:59.875Z" },
+    { url = "https://files.pythonhosted.org/packages/53/51/2152104ee3b64c8c27bfe00302edf0920c7f34cb9a0b9c8452bbe254c77b/mujoco_core-4.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:561c94e59b8cc36dd56ec10c16e38ef715813ab6891ac1e4164ba880fb878657", size = 8219480, upload-time = "2026-11-06T15:34:03.561Z" },
+]
+
+[[package]]
+name = "mujoco-studio"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mujoco-core" },
+    { name = "numpy" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ff/a2/f4ec990f1a217f8463238c7b09ead5a7a2e0d87175db8c2a2dbf1e821444/mujoco_studio-4.0.0.tar.gz", hash = "sha256:19714399ab9870e7775018fe343c0b729103a8b9e6c814ad535ec108a74989dd", size = 2961716, upload-time = "2026-11-06T15:38:46.625Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/98/e5837138e1e9ebecaff34ef900f2a12ebbdf1667904b93e8f366eb1c703c/mujoco_studio-4.0.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:c75081e35fe086e84e192e765bcfc12eed440ce10526745d22b1b2c4ff3ba77e", size = 11735551, upload-time = "2026-11-06T15:37:24.565Z" },
+    { url = "https://files.pythonhosted.org/packages/28/70/3d6e3522916c072bd51aea42838f37114ec4070fffc2e9af0e599ca5774e/mujoco_studio-4.0.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3858f688723c588343938833caad8c03e504dd75944774d9b30dd07d1b9f5789", size = 12220400, upload-time = "2026-11-06T15:37:27.055Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/c3/315abe24109a7ff12093b31d12a941574b38d5d5319362ac01af5ee6aaf6/mujoco_studio-4.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4f204a727d4ed2ca061584ef7e91a5462711b6ad210eb351e16914c4d5f06e6a", size = 12809252, upload-time = "2026-11-06T15:37:31.752Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/89/e7d3f13b0887fc9f58dcdf74e7ccea4673d99ba72fc6d86dbaee68915df3/mujoco_studio-4.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:32f8337a1d10e43c833df4b05742e49ff220920481827d88fef94b72405bc1d2", size = 8573421, upload-time = "2026-11-06T15:37:34.657Z" },
+]
+
+[[package]]
 name = "multidict"
 version = "7.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -963,6 +1028,9 @@ platform = [
     { name = "aiohttp" },
     { name = "nicegui" },
 ]
+simulation = [
+    { name = "mujoco" },
+]
 tactile = [
     { name = "paxini-sdk" },
     { name = "pyserial" },
@@ -984,6 +1052,7 @@ requires-dist = [
     { name = "feetech-servo-sdk", marker = "extra == 'leader'", specifier = "==1.0.0" },
     { name = "flask", marker = "extra == 'calibration'", specifier = "==3.1.3" },
     { name = "flask", marker = "extra == 'video'", specifier = "==3.1.3" },
+    { name = "mujoco", marker = "extra == 'simulation'", specifier = "==4.0.0" },
     { name = "nanobind", marker = "extra == 'follower'", specifier = "==2.10.2" },
     { name = "nicegui", marker = "extra == 'platform'", specifier = "==3.18.0" },
     { name = "numpy", marker = "extra == 'calibration'", specifier = "==2.5.4" },
@@ -1002,7 +1071,7 @@ requires-dist = [
     { name = "scipy", marker = "extra == 'calibration'", specifier = "==1.18.1" },
     { name = "viser", extras = ["urdf"], marker = "extra == 'viewer'", specifier = "==1.1.1" },
 ]
-provides-extras = ["gravity", "cartesian", "platform", "leader", "viewer", "tactile", "video", "calibration", "follower"]
+provides-extras = ["gravity", "simulation", "cartesian", "platform", "leader", "viewer", "tactile", "video", "calibration", "follower"]
 
 [[package]]
 name = "opencv-python-headless"
@@ -1226,6 +1295,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c", size = 5005329, upload-time = "2026-08-17T08:02:48.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
+]
+
+[[package]]
+name = "pyopengl"
+version = "3.1.10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/16/912b7225d56284859cd9a672827f18be43f8012f8b7b932bc4bd959a298e/pyopengl-3.1.10.tar.gz", hash = "sha256:c4a02d6866b54eb119c8e9b3fb04fa835a95ab802dd96607ab4cdb0012df8335", size = 1915580, upload-time = "2025-08-18T02:33:01.76Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/e4/1ba6f44e491c4eece978685230dde56b14d51a0365bc1b774ddaa94d14cd/pyopengl-3.1.10-py3-none-any.whl", hash = "sha256:794a943daced39300879e4e47bd94525280685f42dbb5a998d336cfff151d74f", size = 3194996, upload-time = "2025-08-18T02:32:59.902Z" },
 ]
 
 [[package]]

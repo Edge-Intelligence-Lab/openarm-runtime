@@ -17,7 +17,8 @@ def latest(observation, name):
 
 
 class UprightObservation:
-    def __init__(self, overview, wrist, side="left", size=256, crops=None, execution=False):
+    def __init__(self, overview, wrist, side="left", size=256, crops=None, execution=False,
+                 image_contract=None, head_calibration=None):
         if side not in ("left", "right") or type(size) is not int or size < 1:
             raise ValueError("Invalid side or image size")
         if overview == wrist:
@@ -29,8 +30,86 @@ class UprightObservation:
         if set(self.crops) - {overview, wrist}:
             raise ValueError("Crop names must match selected camera streams")
         self.metadata = dict(overview=overview, wrist=wrist, side=side, size=size,
-                             state_width=10 if execution else 8,
-                             crops=self.crops, image_transform="BGR_to_RGB_area_resize")
+                              state_width=10 if execution else 8,
+                              crops=self.crops, image_transform="BGR_to_RGB_area_resize")
+        self.camera_matrix = self.distortion = None
+        self.wrist_native_shape = None
+        self.wrist_matrix = self.wrist_distortion = None
+        if image_contract is not None or head_calibration is not None:
+            import json
+            from pathlib import Path
+            import numpy as np
+            if image_contract is None or head_calibration is None or self.crops or size != 256:
+                raise ValueError("Calibrated images require contract/calibration, size256 and no crop")
+            raw = Path(image_contract).read_bytes()
+            contract = json.loads(raw)
+            expected = {"schema": "tacpilot.policy-images.v1", "channels": "RGB", "dtype": "uint8",
+                        "head_geometry": "ideal_pinhole_same_K_undistorted",
+                        "head_render_size_wh": [1280, 720], "output_size_wh": [256, 256],
+                        "head_resize": "Pillow_bilinear_full_frame_no_crop",
+                        "real_head_preprocessing": "undistort native RGB with frozen K/distortion and new_K=K, then same resize"}
+            if any(contract.get(key) != value for key, value in expected.items()):
+                raise ValueError("Unsupported calibrated ACT image contract")
+            wrist_size = contract.get("wrist_render_size_wh")
+            if wrist_size == [1280, 720]:
+                wrist_spec = contract.get("wrist")
+                expected_wrist = {"source": "pinned_upstream",
+                    "asset_revision": "06b4c8ad6d547c3faaa3bf780629ee3e1ac2b0d0"}
+                if (contract.get("wrist_resize") != "Pillow_bilinear_full_frame_no_crop"
+                        or not isinstance(wrist_spec,dict)
+                        or any(wrist_spec.get(k)!=v for k,v in expected_wrist.items())
+                        or set(wrist_spec)-set(expected_wrist)-{'intrinsics','optical_center_forward_m','positions_m'}
+                        or contract.get("wrist_fovy_jitter_deg") != 0.):
+                    raise ValueError("Unsupported native wrist image contract")
+                offset = wrist_spec.get('optical_center_forward_m',0.)
+                if type(offset) not in (int,float) or not np.isfinite(offset) or not 0<=offset<=.03:
+                    raise ValueError('Invalid wrist optical-centre offset')
+                if 'positions_m' in wrist_spec:
+                    positions = wrist_spec['positions_m']
+                    if (not isinstance(positions,dict) or set(positions) != {'left','right'}
+                            or any(np.asarray(p).shape != (3,) or not np.isfinite(p).all() for p in positions.values())):
+                        raise ValueError('Invalid wrist camera positions')
+                measured = wrist_spec.get('intrinsics')
+                if measured is not None:
+                    if (not isinstance(measured,dict)
+                            or measured.get('schema') not in ('openarm.shared-wrist-intrinsics.v1','openarm.wrist-intrinsics.v1')
+                            or measured.get('image_size')!=[1280,720]
+                            or measured.get('distortion_model')!='opencv_5'
+                            or (measured.get('schema')=='openarm.shared-wrist-intrinsics.v1' and
+                                (measured.get('measured_side')!='left' or measured.get('applies_to')!=['left','right']
+                                 or measured.get('right_reuse')!='operator_authorized_not_independently_calibrated'))
+                            or contract.get('wrist_geometry')!='ideal_pinhole_same_K_undistorted'
+                            or contract.get('real_wrist_preprocessing')!='undistort native RGB with shared wrist K/distortion and new_K=K, then same resize'):
+                        raise ValueError('Unsupported measured wrist image contract')
+                    k,d=np.asarray(measured.get('matrix'),float),np.asarray(measured.get('distortion'),float)
+                    if (k.shape!=(3,3) or d.shape!=(5,) or not np.isfinite(k).all() or not np.isfinite(d).all()
+                            or min(k[0,0],k[1,1])<=0 or not np.array_equal(k[2],[0.,0.,1.])
+                            or k[0,1]!=0 or k[1,0]!=0):
+                        raise ValueError('Invalid wrist intrinsic matrix/distortion')
+                    self.wrist_matrix,self.wrist_distortion=k,d
+                self.wrist_native_shape = (720, 1280, 3)
+            elif wrist_size != [256, 256] or "wrist_resize" in contract:
+                raise ValueError("Unsupported calibrated ACT wrist image geometry")
+            calibration_raw = Path(head_calibration).read_bytes()
+            head = contract.get("head", {})
+            calibration = json.loads(calibration_raw)
+            camera = calibration["camera"]
+            if (calibration.get("schema") != "openarm.camera-baseline.v1"
+                    or calibration.get("version") != head.get("version")
+                    or camera.get("image_size") != [1280, 720]
+                    or camera.get("image_geometry") != "native_no_transform"
+                    or camera.get("distortion_model") != "opencv_5"):
+                raise ValueError("Unsupported native head calibration")
+            self.camera_matrix = np.asarray(camera["matrix"], dtype=float)
+            self.distortion = np.asarray(camera["distortion"], dtype=float)
+            if (self.camera_matrix.shape != (3, 3) or self.distortion.shape != (5,)
+                    or not np.isfinite(self.camera_matrix).all() or not np.isfinite(self.distortion).all()
+                    or min(self.camera_matrix[0, 0], self.camera_matrix[1, 1]) <= 0
+                    or not np.array_equal(self.camera_matrix[2], [0., 0., 1.])):
+                raise ValueError("Invalid head intrinsic matrix/distortion")
+            self.metadata.update(image_contract=contract,
+                image_transform="native_BGR_to_RGB_head_undistort_same_K_Pillow_bilinear",
+                wrist_calibration=contract.get('wrist_calibration','nominal_not_hardware_calibrated'))
 
     def reset(self, context):
         specs = {s.name: s for s in context.streams}
@@ -51,6 +130,19 @@ class UprightObservation:
         image = np.asarray(latest(observation, name))
         if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
             raise ValueError("Expected HWC uint8 BGR camera image")
+        if self.camera_matrix is not None:
+            from PIL import Image
+            rgb = np.ascontiguousarray(image[..., ::-1])
+            if name == self.overview:
+                if rgb.shape != (720, 1280, 3):
+                    raise ValueError("Calibrated head requires native 1280x720, not resized previews")
+                rgb = cv2.undistort(rgb, self.camera_matrix, self.distortion, None, self.camera_matrix)
+            elif self.wrist_native_shape is not None and rgb.shape != self.wrist_native_shape:
+                raise ValueError("Native wrist requires 1280x720, not resized previews")
+            elif self.wrist_matrix is not None:
+                rgb = cv2.undistort(rgb,self.wrist_matrix,self.wrist_distortion,None,self.wrist_matrix)
+            self.metadata.setdefault("source_shapes", {})[name] = list(image.shape)
+            return np.asarray(Image.fromarray(rgb).resize((256, 256), Image.Resampling.BILINEAR)).copy()[None]
         if name in self.crops:
             crop = self.crops[name]
             if len(crop) != 4 or any(type(v) is not int for v in crop):
@@ -163,7 +255,6 @@ class AbsoluteUprightActions(UprightActions):
     """
     def __init__(self, action_contract, closed_opening_m, open_opening_m, side="left",
                  execute_steps=25, gripper_action_curve=None):
-        import hashlib
         import json
         import math
         from pathlib import Path
@@ -200,8 +291,7 @@ class AbsoluteUprightActions(UprightActions):
         super().__init__(closed_opening_m, open_opening_m, side, execute_steps,
                          gripper_action_curve=gripper_action_curve)
         self.contract = contract
-        self.metadata.update(action_semantics=contract["schema"], action_contract=contract,
-                             action_contract_sha256=hashlib.sha256(raw).hexdigest())
+        self.metadata.update(action_semantics=contract["schema"], action_contract=contract)
 
     def reset(self, context):
         import math

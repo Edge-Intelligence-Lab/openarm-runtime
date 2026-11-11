@@ -23,6 +23,9 @@ def main():
     leader.add_argument("--follow", action="store_true", help="Add operator-started physical follower controls")
     leader.add_argument("--report-root", type=Path)
     leader.add_argument("--collection-profile", type=Path, help="Enable episode controls and own configured acquisition devices")
+    leader.add_argument('--head-calibration-profile',type=Path,help='Passive head calibration from this teleoperator feedback')
+    leader.add_argument('--head-calibration-root',type=Path,help='External immutable calibration evidence directory')
+    leader.add_argument('--head-video-port',type=int,default=5003,help='Existing loopback camera service; never opens another camera')
     commands.add_parser("check", help="Read-only: verify both Classic buses and disabled motors")
     calibration = commands.add_parser("calibrate", help="Move one v2 arm, find stops and write hardware zeros (experimental)")
     calibration.add_argument("--side", choices=("left", "right"), required=True)
@@ -56,6 +59,8 @@ def main():
     policy.add_argument("--sides", nargs="+", choices=("left", "right"), default=["left", "right"])
     policy.add_argument("--duration", type=float, default=10)
     policy.add_argument("--record", type=Path, help="New episode directory outside Git")
+    policy.add_argument("--record-mode", choices=("summary", "full"), default="summary",
+                        help="Compact result receipt by default; full explicitly saves observations/actions")
     policy.add_argument("--allow-nominal-geometry", action="store_true",
                         help="Explicit operator trial with declared uncalibrated model geometry; not a calibration assertion")
     model_serve = commands.add_parser("model-serve", help="Serve an optional model on loopback; never opens robot devices")
@@ -197,6 +202,12 @@ def main():
         prepare(args.asset_root)
         return
     if args.command == "leader":
+        if args.head_calibration_profile and args.collection_profile:
+            parser.error('Head calibration and demonstration collection use separate workspaces')
+        if args.head_calibration_profile and (not args.follow or args.head_calibration_root is None):
+            parser.error('--head-calibration-profile requires --follow and --head-calibration-root')
+        if not 1024<=args.head_video_port<=65535:
+            parser.error('--head-video-port must be 1024..65535')
         if args.collection_profile and not args.follow:
             parser.error("--collection-profile requires --follow")
         if args.follow and (args.config is None or args.report_root is None):
@@ -211,6 +222,9 @@ def main():
         previous = signal.signal(signal.SIGTERM, shutdown_leader)
         try:
             options = {"control_profile": Profile.load(args.config), "report_root": args.report_root} if args.follow else {}
+            if args.head_calibration_profile:
+                options.update(head_calibration_profile=args.head_calibration_profile,
+                    head_calibration_root=args.head_calibration_root,head_video_port=args.head_video_port)
             from contextlib import ExitStack
             with ExitStack() as stack:
                 if args.collection_profile:

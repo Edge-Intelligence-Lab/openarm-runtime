@@ -245,20 +245,20 @@ class UprightTests(unittest.TestCase):
         opener = Mock()
         opener.open.return_value.__enter__ = Mock(return_value=response)
         opener.open.return_value.__exit__ = Mock(return_value=False)
-        response.read.return_value = b'{"ready": true, "model": {"model_sha256": "fixture"}}'
+        response.read.return_value = b'{"ready": true, "model": {"git_revision": "fixture"}}'
         with patch("openarm_policy.models.http.build_opener", return_value=opener):
             client.reset(None)
         response.read.return_value = b'{"actions": [[0, 1]]}'
         self.np.testing.assert_array_equal(client.predict({"state": self.np.zeros((1, 8))}), [[0, 1]])
 
-    def test_model_service_health_hash_mismatch_rejects_before_start(self):
+    def test_model_service_git_revision_mismatch_rejects_before_start(self):
         from openarm_policy.models.http import NumpyHTTP
         response = Mock()
-        response.read.return_value = b'{"ready": true, "model": {"model_sha256": "wrong"}}'
+        response.read.return_value = b'{"ready": true, "model": {"git_revision": "wrong"}}'
         opener = Mock()
         opener.open.return_value.__enter__ = Mock(return_value=response)
         opener.open.return_value.__exit__ = Mock(return_value=False)
-        client = NumpyHTTP("http://127.0.0.1:8765", expected_model_sha256="expected")
+        client = NumpyHTTP("http://127.0.0.1:8765", expected_identity={"git_revision": "expected"})
         with patch("openarm_policy.models.http.build_opener", return_value=opener):
             with self.assertRaises(ValueError): client.reset(None)
 
@@ -304,6 +304,22 @@ class UprightTests(unittest.TestCase):
 
 @unittest.skipUnless(NUMERIC, "install Cartesian/video numeric dependencies")
 class CartesianDispatchTests(unittest.TestCase):
+    def test_preparation_speed_is_separate_from_learned_policy_speed(self):
+        from openarm_policy.cartesian import CartesianRobot
+        from openarm_policy.preparation import FixedJointPreparation
+        from openarm_policy.contracts import Context
+        robot = CartesianRobot(self.plant, dict(self.config, preparation_velocity_rad_s=.5))
+        prep = FixedJointPreparation('left', [{'name':'ready', 'joints_rad':[0.]*7}], velocity_rad_s=.5)
+        prep.bind(robot, Context(robot.spec, robot.streams, 20))
+        self.assertEqual(robot.speed, .25)
+        self.assertEqual(robot.preparation_speed, .5)
+        robot.start()
+        robot.begin_preparation()
+        robot.submit_preparation((.02, 0, 0, 0, 0, 0, 0, 0), time.monotonic()+1)
+        with self.assertRaisesRegex(ValueError, 'velocity'):
+            robot.submit_preparation((.05, 0, 0, 0, 0, 0, 0, 0), time.monotonic()+1)
+        robot.close()
+
     def setUp(self):
         import numpy as np
         from openarm_policy.cartesian import CartesianRobot

@@ -55,7 +55,14 @@ class PolicySession:
         self.preparation = preparation
         self._handoff_hold = None
         if preparation is not None:
-            preparation.bind(robot, self.context)
+            try:
+                preparation.bind(robot, self.context)
+            except BaseException as exc:
+                # Constructor validation precedes robot.start(): no motor worker
+                # exists, so report a truthful startup rejection, not lost cleanup.
+                self._record('ended', state='failed', error=str(exc), cleanup_errors=[],
+                             stop_reason='preflight_rejected', hardware_started=False)
+                raise
 
     def stop(self):
         self.cancel.set()
@@ -70,9 +77,12 @@ class PolicySession:
             self.on_event(payload)
 
     def _observe(self):
-        samples = self.robot.snapshot()
+        samples = {}
         for source in self.sources:
             samples.update(source.snapshot())
+        # Fetch potentially blocking sources first, then fresh robot feedback.
+        # Never change a sample timestamp to hide latency or stale feedback.
+        samples.update(self.robot.snapshot())
         return self.buffer.collect(samples)
 
     def _wait_for_sources(self):
@@ -143,6 +153,7 @@ class PolicySession:
             raise ValueError("duration_s must be positive")
         worker = None
         primary_error = None
+        stop_reason = 'operator_stop'
         self.state = "starting"
         try:
             self._record("context", context=asdict(self.context), config=asdict(self.config))
@@ -166,6 +177,9 @@ class PolicySession:
             while not self.cancel.is_set():
                 tick = time.monotonic()
                 if duration_s is not None and tick - started >= duration_s:
+                    stop_reason = 'duration_reached'
+                    self._record('duration_reached', phase='task', elapsed_s=tick-started,
+                                 duration_s=duration_s)
                     break
                 if tick - last_tick > max(0.25, 3 * period):
                     raise TimeoutError("Session deadline missed")
@@ -220,6 +234,7 @@ class PolicySession:
             if self.state != "failed":
                 self.state = "stopped" if not errors else "failed"
             self._record("ended", state=self.state, error=str(primary_error or ""),
+                         stop_reason='error' if primary_error or errors else stop_reason,
                          cleanup_errors=[str(e) for e in errors])
             if errors:
                 raise BaseExceptionGroup("Policy session cleanup failed", ([primary_error] if primary_error else []) + errors)

@@ -62,6 +62,7 @@ class ServiceManager:
         self._closed = False
         self._closing = False
         self._blocked_groups = {}
+        self._motion_owner = None
         self._lock = threading.RLock()
 
     def _launch(self, service):
@@ -95,6 +96,8 @@ class ServiceManager:
             for name, service in self._services.items():
                 if reachable[name]:
                     service.external = True
+                elif getattr(service.page,'lazy',False):
+                    service.standby = True
                 elif service.group in occupied_groups or service.group in selected_groups:
                     service.standby = True
                 elif service.page.command:
@@ -160,6 +163,8 @@ class ServiceManager:
             if name not in self._services:
                 raise ValueError(f"Unknown service: {name}")
             target = self._services[name]
+            if target.group == 'motion' and self._motion_owner is not None:
+                raise ValueError('请先停止模型执行并等待清理完成，再切换控制服务')
             if not target.group:
                 self._activate_independent(target)
                 return self.status()
@@ -203,6 +208,58 @@ class ServiceManager:
             else:
                 self._launch(target)
             return self.status()
+
+    def deactivate(self,name):
+        """Explicitly close one owned task without starting a replacement."""
+        with self._lock:
+            if name not in self._services or self._closing or self._closed:
+                raise ValueError('服务不存在或平台正在关闭')
+            target=self._services[name]
+            if target.process is None and tcp_reachable(target.page.port):
+                raise ValueError('外部启动的服务不能由本平台停止')
+            if target.process is not None:
+                failures,forced=self._stop_services([target])
+                if failures or forced:
+                    message='服务未确认正常退出，请现场检查后再切换控制'
+                    if target.group:self._blocked_groups[target.group]=message
+                    raise ValueError(message)
+            target.standby=True
+            return self.status()
+
+    def claim_motion(self, owner):
+        """Explicit policy start only; use the existing normal motion handover.
+
+        A loaded model does not own this lease. External controllers are never
+        stopped. Failed/forced cleanup blocks subsequent motion as before.
+        """
+        with self._lock:
+            if not self._started or self._closing or self._closed:
+                raise ValueError('平台服务尚未就绪或正在关闭')
+            if self._motion_owner is not None or 'motion' in self._blocked_groups:
+                raise ValueError(self._blocked_groups.get('motion', '已有模型执行占用控制'))
+            peers = [s for s in self._services.values() if s.group == 'motion']
+            for peer in peers:
+                if peer.process is None and tcp_reachable(peer.page.port):
+                    raise ValueError(f'请先由操作员停止外部控制服务：{peer.label}')
+                if peer.process is not None and peer.process.poll() is not None:
+                    self._blocked_groups['motion'] = '控制服务异常退出，请现场检查后重启平台'
+                    raise ValueError(self._blocked_groups['motion'])
+            for peer in peers:
+                if peer.process is not None:
+                    failures, forced = self._stop_services([peer])
+                    if failures or forced:
+                        self._blocked_groups['motion'] = '控制服务未正常退出，已阻止模型执行'
+                        raise ValueError(self._blocked_groups['motion'])
+                    peer.standby = True
+            self._motion_owner = owner
+
+    def release_motion(self, owner, *, clean):
+        with self._lock:
+            if self._motion_owner != owner:
+                raise ValueError('模型执行不拥有当前控制租约')
+            self._motion_owner = None
+            if not clean:
+                self._blocked_groups['motion'] = '模型会话未确认正常清理，请现场检查后重启平台'
 
     @staticmethod
     def _signal(process, sig):
@@ -286,6 +343,8 @@ class ServiceManager:
         with self._lock:
             if self._closed:
                 return
+            if self._motion_owner is not None:
+                raise RuntimeError('模型执行尚未确认停止，不能关闭其依赖服务；未强制终止控制进程')
             self._closing = True
             owned = [s for s in self._services.values() if s.process is not None]
             failures, _ = self._stop_services(owned)

@@ -1,6 +1,8 @@
 """Optional loopback inference service; never imports or opens robot devices."""
 import io
 import json
+import signal
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from .policy import component
@@ -12,6 +14,8 @@ def serve(spec, port):
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("Invalid model service port")
     model = component(spec)
+    stopping = threading.Event()
+    previous = {}
     try:
         model.reset(None)
 
@@ -50,8 +54,13 @@ def serve(spec, port):
                 pass
 
         with HTTPServer(("127.0.0.1", port), Handler) as server:
-            server.timeout = 5
+            server.timeout = .2
+            previous = {sig: signal.signal(sig, lambda *_: stopping.set())
+                        for sig in (signal.SIGINT, signal.SIGTERM)}
             print(json.dumps({"model_ready": True, "port": port, "model": getattr(model, "metadata", {})}), flush=True)
-            server.serve_forever()
+            while not stopping.is_set():
+                server.handle_request()
     finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
         model.close()

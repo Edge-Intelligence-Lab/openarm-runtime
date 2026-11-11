@@ -7,6 +7,88 @@ import threading
 from .contracts import Observation, SensorSample
 
 
+class CompactEpisodeRecorder:
+    """Bounded result receipt, not replay: no RGB, action/chunk or state archives.
+
+    Recording never changes control. Lifecycle/error/cleanup evidence is retained;
+    absence of an operator success judgment is explicitly unknown, not success.
+    """
+    def __init__(self, directory):
+        self.directory = Path(directory)
+        self.directory.mkdir(parents=True, exist_ok=False)
+        self.lock = threading.Lock()
+        self.summary = {"schema": "openarm.compact-policy-episode.v1", "retention": "summary",
+                        "task_success": None, "success_judgment": "operator_required",
+                        "complete": False, "event_counts": {}, "lifecycle": []}
+        self._write()
+
+    def _plain(self, value):
+        if hasattr(value, "tolist"):
+            return value.tolist()
+        if is_dataclass(value):
+            from dataclasses import fields
+            return {f.name: self._plain(getattr(value, f.name)) for f in fields(value)}
+        if isinstance(value, dict):
+            return {k: self._plain(v) for k, v in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [self._plain(v) for v in value]
+        return value
+
+    def _write(self):
+        path = self.directory / "summary.json"
+        temporary = self.directory / "summary.json.tmp"
+        temporary.write_text(json.dumps(self.summary, allow_nan=False, indent=2)+"\n")
+        temporary.replace(path)
+
+    def record(self, event):
+        with self.lock:
+            name = event["event"]
+            counts = self.summary["event_counts"]
+            counts[name] = counts.get(name, 0) + 1
+            if name == "observation":
+                self.summary["last_observation_sequence"] = event["observation"].sequence
+                return
+            if name in ('gravity_sample', 'integral_sample', 'hold_sample'):
+                self.summary.setdefault('last_control_samples', {})[name] = self._plain(event)
+                return
+            if name == "chunk":
+                chunk = event["chunk"]
+                diagnostics = chunk.get("diagnostics", {})
+                if "model" not in self.summary:
+                    self.summary["model"] = self._plain({k: diagnostics[k] for k in (
+                        "model", "observation_adapter", "action_adapter") if k in diagnostics})
+                latency = event.get("latency_s")
+                if latency is not None:
+                    values = self.summary.setdefault("inference_latency_s", {"count": 0, "sum": 0., "max": 0.})
+                    values["count"] += 1; values["sum"] += latency; values["max"] = max(values["max"], latency)
+                return
+            if name in ("command", "handoff_hold", "preparation_command", "cartesian_dispatch",
+                        "cartesian_progress_wait", "cartesian_preparation_dispatch"):
+                # One terminal numeric snapshot replaces the previous one; no trajectory.
+                if name.startswith("cartesian_"):
+                    self.summary["last_cartesian_state"] = self._plain(event)
+                return
+            if name in ("context", "cartesian_context", "video_source", "retention_context"):
+                self.summary[name] = self._plain(event)
+            else:
+                self.summary["lifecycle"].append(self._plain(event))
+                self.summary["lifecycle"] = self.summary["lifecycle"][-32:]
+            if name == "ended":
+                self.summary["termination"] = self._plain(event)
+                self.summary["complete"] = True
+            self._write()
+
+    def close(self):
+        with self.lock:
+            self._write()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
 class EpisodeRecorder:
     """Lossless observations + submitted actions, not a training dataset format.
 

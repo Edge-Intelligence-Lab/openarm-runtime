@@ -245,6 +245,12 @@ physical verification.
 
 ## Policy visualization
 
+The same `/#policy` entry is now **模型与执行**. Its model catalogue and
+operator-started execution flow are described in [models-web.md](models-web.md).
+The section below describes the separate, passive simulation/replay tools, not
+the new explicit model-execution button. Loading/sample testing never takes a
+motion lease; confirmed execution does.
+
 The platform includes an internal **策略可视化** module at
 `http://127.0.0.1:8888/#policy`; `/policy` opens it without the dashboard shell.
 It uses the same NiceGUI server and needs no extra port or device service.

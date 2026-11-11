@@ -1,0 +1,10 @@
+/* Scoped to the explicit calibration workspace. Colours mirror platform.css. */
+body:has(.teleop-calibration-skin){--cal-green:#36735a;--cal-ink:#2c4234;--cal-muted:#6f8075;--cal-line:#e0e7de;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;color:var(--cal-ink)}
+body:has(.teleop-calibration-skin) :is(button,input,select,textarea){font-family:inherit}
+body:has(.teleop-calibration-skin) :is(p,span,div,h2,h3,label,button,legend){font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif!important}
+body:has(.teleop-calibration-skin) button{min-height:32px;border-radius:7px;letter-spacing:.01em}
+body:has(.teleop-calibration-skin) :is(fieldset,.mantine-Paper-root){border-color:var(--cal-line);border-radius:9px}
+body:has(.teleop-calibration-skin) :is(h2,h3){font-family:inherit;font-weight:600;line-height:1.4}
+.cal-stage{padding:8px 0 12px}.cal-stage small{font-size:.72rem;color:var(--cal-muted);letter-spacing:.06em}.cal-stage h2{font-size:1.35rem;margin:5px 0 14px;letter-spacing:-.035em}.cal-steps{display:flex;justify-content:space-between;gap:6px;align-items:center}.cal-step{font-size:.75rem;color:#87958b;white-space:nowrap}.cal-step b{display:inline-grid;place-items:center;width:20px;height:20px;margin-right:5px;background:#f0f3ed;border-radius:50%;font-size:.68rem}.cal-step.current{color:var(--cal-green);font-weight:650}.cal-step.current b{background:var(--cal-green);color:white}.cal-step.done b{background:#e5ede2;color:var(--cal-green)}
+.cal-camera-state{font-size:.75rem;line-height:1.6;padding:7px 9px;margin:7px 0;border-radius:6px;background:#f6f3e9;color:#80672f}.cal-camera-state[data-ready="true"]{background:#edf3ec;color:#36735a}.cal-instruction{padding:11px 0 7px}.cal-instruction h3{font-size:1.02rem;margin:0 0 5px}.cal-instruction p{font-size:.78rem;color:var(--cal-muted);line-height:1.7;margin:0}
+@media(max-width:500px){.cal-stage h2{font-size:1.15rem}.cal-step{font-size:.7rem}.cal-step b{width:18px;height:18px;margin-right:3px}}

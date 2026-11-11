@@ -1,162 +1,117 @@
-# Offline head/wrist hand-eye calibration
+# Camera calibration
 
-## Unified web workflow (head camera only)
+Robot alignment has one workflow:
+[operator-controlled leader/follower calibration](teleop-head-calibration.md).
+The operator controls arm pose and grip. Calibration never lifts the arm,
+commands mounting actions or searches poses.
+
+## Unified web workflow
+
+Open **相机标定** at `/#camera_calibration` or `/camera-calibration`.
+The column contains **头部相机标定** and **腕部相机内参标定**.
+**机器人对齐** contains its own operator-controlled calibration workspace when
+`teleop_calibration_profile` is configured, separate from teleoperation data
+collection. **镜头内参** retains its separate
+capture-first intrinsic workflow. Opening a page enables no motors and opens no
+camera. Install `.[platform,calibration]` plus the existing teleoperation extras.
+
+### Wrist camera intrinsics
+
+Select **腕部相机内参标定**, then **左腕相机** or **右腕相机**. The selected
+camera must already be configured as `left`/`right` in the existing video service
+with a distinct `calibration_identity`; the page never opens a second device
+handle or starts a robot controller. Opening the page does not fetch or save frames.
+Move the board by hand while the camera stays fixed; no arm motion or FK is needed.
+
+The editable wrist default matches the current head board: **ChArUco, 6×4 squares,
+22.5 mm squares, 16.5 mm markers, `DICT_4X4_50`**. The earlier 10×7-square plain
+checkerboard is not the current physical board; it remains an explicit alternative.
+Confirm the actual printed dimensions before starting. Capture
+16 fitting and 4 held-out check views with two-axis tilt and edge coverage; the
+existing 8 + 3 minimum and quality diagnostics remain unchanged.
+
+Wrist evidence is isolated under `calibration_root/wrist-intrinsics`. Camera
+selection is locked during a session; identity, resolution, mode and source
+generation may not change. Head and wrist images/results are never combined.
+Each saved candidate names one camera and is marked `intrinsics_only` and
+`installed: false`; there is no automatic left-to-right copy. Identical model names
+do not establish identical optical parameters. Calibrating only the left camera
+is sufficient to obtain a candidate for the current left-arm policy, not the right.
+
+After solving, the page shows focal lengths/principal point and fitting/check
+errors. **查看去畸变对照** compares the last accepted original evidence frame with
+same-K undistortion, without cropping, fresh capture or changing a camera control.
+**保存标定候选** explicitly saves without a separate acceptance checkbox. It does
+not activate parameters, change a model contract or retrain weights. This workspace
+has no robot-coordinate alignment or head-extrinsics import.
 
 ### Capture workspace
 
-The page is organized around a live image and the next available action, not a
-list of internal APIs. Initially it shows **开始标定** and the confirmed board
-summary; **棋盘与相机设置** and shooting tips are collapsed. **查看画面** previews
-without creating evidence. Explicitly starting calibration also connects the
-existing preview and reveals **拍摄一张**, photo-purpose selection and counts.
-Opening the page still starts neither hardware nor evidence collection.
+Intrinsic calibration starts with **开始标定**, a live image and the next action.
+Board/camera settings and pose guidance are collapsed until needed. Preview
+borrows the existing reader; only explicit captures save full-size lossless PNGs
+and source metadata. JPEG previews are not calibration evidence.
 
-Each action has its own inline live-region feedback. Capture immediately shows
-loading, disables repeated clicks, and reports either the accepted corner count
-or why that photo was not collected and how to retry. Errors never depend on a
-banner above the viewport. Preview errors have a reconnect action beside the
-image. An unstarted or foreign-owned session has no capture control.
+The current editable default is indexed ChArUco: 6×4 squares, 22.5 mm squares,
+16.5 mm markers, `DICT_4X4_50`, camera `head`. Enter measured dimensions and confirm
+print scale. The historical 10×7-square, 15 mm checkerboard has 9×6 internal
+corners and is valid for intrinsics, not an orientation-verified extrinsic board.
+Teleoperation extrinsics require indexed ChArUco, not a symmetric checkerboard.
 
-**标定照片** means fit images; **检查照片** means predeclared held-out validation.
-The capture panel illustrates the next recommended pose: camera-view position,
-which edge is nearer the lens (blue), and an approximate 25–30 degree tilt.
-It distinguishes tilt from rolling the board in the image. The 16 fit suggestions
-cover four front views, four yaw tilts, four pitch tilts and four combined tilts;
-four validation suggestions are independently declared before capture. A collapsed
-overview previews the four basic directions without changing the current step.
-The diagrams are pure perspective geometry, not real-time pose measurements or
-photographable calibration patterns. No robot is moved, no detection is claimed
-from a drawing, and counts do not prove the requested pose was followed.
+For intrinsics, **标定照片** are fitting images and **检查照片** are predeclared
+held-out images. Suggestions cover centre/edges, distances and two-axis tilt;
+rolling a frontal board is not tilt. Guidance advances only after acceptance.
+Recommended counts are 16 fit + 4 check; intrinsic solver minima remain 8 + 3.
+Its per-image RMS, matrix and distortion stay visible; no sample is silently
+removed. This differs from teleoperation extrinsics' fixed **12 fit + 4 check**.
 
-Only accepted photos advance the illustration; failures keep the same step.
-Counters show the recommended 16 and 4 while the solver's unchanged minima remain
-8 and 3. After 16 fit images, the page offers **下一步：拍检查照片** without silently changing photo purpose.
-**计算标定结果** enables at the unchanged 8-fit/3-validation minimum, and reports errors at
-that button. Counts are not physical acceptance. Results and save confirmation
-appear only once an estimate exists. Saving remains an explicit, unverified
-candidate operation; there is no automatic installation.
+Inline feedback explains failed captures without advancing counts. Settings lock
+for a live session. A foreign window cannot capture, cancel or save another
+session. An inactive intrinsic-session lease expires after 120 seconds; status
+reads do not acquire ownership. Cancellation retains evidence and is not an
+emergency stop. Hidden platform iframes can remain connected: use explicit stop
+or cancel controls, not navigation, to end operations.
 
-Settings lock during a live session with an explanation. A second window says
-to return to the original rather than displaying editable-looking blank fields.
-After the owner's heartbeat expires (120 seconds), status reads from another
-window also release the expired lease; they never take ownership. Ending a
-session requires confirmation, keeps evidence, and does not stop hardware.
-Offline external-pose import and provenance details live under **高级**, outside
-the normal intrinsic-calibration flow. The original extrinsics restrictions apply.
+### Source and timing contract
 
-The platform now includes **头部相机标定** at `/#camera_calibration`, or
-`/camera-calibration` on the same server. Install `.[platform,calibration]`.
-Opening the page does not open a camera, acquire CAN, select a controller or
-start a service. It also works in `--attach-only` mode. Existing configured video
-capture must already be available; the page never restarts it. All robot movement
-remains with the on-site operator and the existing control interface.
+Configure RGB `calibration_identity` from its serial, lens and installation.
+Update it after lens/focus, mounting, mode or crop changes. This is supplied
+provenance, not automatic hardware verification. Changed capture generation,
+dimensions or identity is rejected within a session.
 
-Intrinsics support **ordinary black/white checkerboards or indexed ChArUco boards,
-and pinhole cameras with OpenCV's five distortion coefficients**, not fisheye
-lenses or wrist calibration. Select the board type and enter actual square counts
-(not inner-corner counts) and measured square length in metres. ChArUco additionally
-requires marker length and dictionary; these fields are hidden for checkerboards.
-The page defaults to the operator-confirmed new ChArUco board: 6-by-4 squares,
-22.5 mm squares, 16.5 mm markers, `DICT_4X4_50`, camera `head`. These are editable,
-not inferred from the image. Change them when using another board; the old 10-by-7
-15 mm plain checkerboard is historical evidence, not the current default.
-No session starts automatically. Confirm printed scale and lens model first.
+The video owner serves `/calibration/frame/head.png`, proxied as
+`/apps/vision/calibration/frame/head.png`, with atomic metadata in
+`X-Calibration-Metadata`. It borrows the existing reader, never reopening a
+device. Browsers cannot nominate other URLs or filesystem paths. Frames are
+bounded to 4096 pixels/dimension, 8 million pixels and 24 MB PNG. Preview streaming
+at `/apps/vision/stream/head.mjpg` drops intervening frames for slow clients.
 
-For example, a 10-by-7-square board with measured 15 mm squares has 9-by-6 inner
-corners (54 total) and uses `square_size_m=0.015`. The ordinary checkerboard spec is:
+Robot alignment requires qualified acquisition timing and fresh per-joint
+measured feedback. Every joint must continuously bracket acquisition by at least
+0.5 s before and 0.2 s after, with gaps ≤0.15 s and position span ≤0.003 rad.
+FK uses one original measured row, not a target or invented average. Physical
+cameras require V4L2 timing qualification; HTTP receipt cannot be renamed into
+exposure time. Physical and simulation sources cannot mix.
 
-```json
-{"type":"checkerboard","squares_x":10,"squares_y":7,"square_size_m":0.015}
-```
+### Evidence and output
 
-The full grid must be visible; partial checkerboard detections are rejected.
-Checkerboard corner IDs are **per-image grid indices**, not globally indexed
-physical corners. This is sufficient for intrinsic fitting, but does not establish
-a fixed board coordinate frame across rotated views for hand-eye fitting. Such
-sessions explicitly reject external-pose imports; adding a direction mark alone
-does not make the current detector verify it. Existing indexed ChArUco sessions
-retain the offline head observation import. Real-time external-pose capture stays
-disabled for both board types.
+Evidence stays under external `calibration_root`, not Git. Original PNGs, source
+identities, corners and stationary brackets are retained. A rejected manual
+capture consumes no pose slot and its available image/reason is retained within
+the 256 MiB budget. Closing or starting another group never deletes originals.
+Partial writes are not accepted captures or saved candidates.
 
-In the external video profile, add a nonempty `calibration_identity` to the RGB
-camera entry: use the actual camera serial, lens and fixed installation identity.
-Update that identity whenever the lens, focus/zoom setting, camera mounting or
-driver crop changes. This is operator-supplied provenance, not automatically
-verified hardware identity. A changed capture generation, resolution, nominal
-capture mode or identity is rejected inside a session. The capture backend does
-not currently measure focus, crop or exposure settings; freeze those physically.
-
-The live preview uses `/apps/vision/stream/head.mjpg`: one multipart JPEG
-connection, up to 30 fps subject to actual capture/network speed. It borrows the
-existing reader, skips duplicate frames, and drops intervening frames for slow
-clients rather than queuing them. Pausing removes the image source and closes the
-preview connection, not the camera owner. It is not calibration evidence.
-
-The separate sampling endpoint is `/apps/vision/calibration/frame/head.png` (replace
-`head` with the configured camera ID). The video owner encodes one existing
-snapshot as lossless PNG at its actual capture resolution, with atomic metadata
-in `X-Calibration-Metadata`. It does not reopen the device or use the resized
-JPEG preview. Frames without a configured identity/generation fail closed. Old
-external vision services need this contract; the browser cannot provide a custom
-URL as a workaround. RGB frames are bounded to 4096 pixels per dimension,
-8 million pixels total and 24 MB encoded PNG.
-
-1. Start a session explicitly; this creates evidence under the external
-   `calibration_root` platform setting (default `~/.local/share/openarm-calibration`).
-   The browser cannot choose filesystem paths. Starting the platform/page alone
-   does not create evidence. Preview is separately opt-in.
-2. Move the **hand-held** board through image centre/edges, different distances
-   and tilts about two axes. Before every capture, select fit or held-out
-   validation. At least 8 fit and 3 held-out images are required. The detector
-   requires 8 non-collinear indexed corners with at least 20-pixel span in both
-   image axes. Corner counts, image coverage/centre and a sharpness indicator
-   help the operator; they are not physical acceptance criteria.
-3. Solve and inspect per-image RMS, K and distortion. Only fit images calibrate
-   K; held-out images estimate their own board poses with that fixed K. A
-   two-axis board-normal excitation check rejects degenerate captures. No sample
-   is silently removed. **Held-out reprojection is not independent metric
-   verification**: inspect board scale, camera model, image geometry and known
-   physical references before any deployment. High residuals remain visible;
-   they do not become verified merely because a candidate can be saved.
-4. Optionally import an existing compliant **head** observation JSON, up to 2 MB
-   and 256 samples, to run the offline external-pose fit below. Camera name must
-   match the session. Original upload bytes and their hash are preserved.
-   Imported timing/FK/model/intrinsics provenance is supplied by the operator,
-   not verified by the web runtime. Imported external poses are explicitly
-   **not bound to the web-solved intrinsics**; do not treat the bundle as an
-   automatically compatible deployed profile.
-5. Check the explicit confirmation box to save `SESSION/candidate.json` without
-   overwriting an old result. The candidate records evidence hashes, board and
-   camera identity, fit/validation split, numerical-library versions and solver
-   source hashes. Original PNGs and their metadata/detected corners live under
-   `SESSION/SAMPLE/`; original external-pose imports live under `SESSION/head-*/`.
-   All results remain `estimated_not_independently_verified`, `installed: false`.
-   Saving never changes a machine profile or activates calibration.
-
-**Real-time external-pose capture is deliberately disabled.** Existing video
-`received_at` is host receipt after `read()`, not exposure time. There is no
-trusted exposure-time/measured-FK pairing interface yet. Do not relabel receipt
-times or ordinary recordings to satisfy the offline 50 ms contract. For head
-external-pose calibration the camera is fixed to base and the board must be
-rigidly attached to the tool; a freely hand-held board cannot establish
-`base_from_camera` without another measured base reference.
-
-One browser owns the session; other browsers cannot capture, cancel or save it.
-An inactive lease expires after 120 seconds without owner heartbeat/action.
-Cancellation invalidates late computation results and retains evidence. It does
-not close borrowed devices or stop another page's motion: **cancel is not an
-emergency stop**. Page navigation preserves platform iframes, so use the explicit
-cancel button rather than assuming a hidden page has stopped. Sessions are
-bounded to 64 images and 256 MiB of PNG data. Evidence already written is retained
-on cancellation, failure and server shutdown; session resumption and deletion
-are not provided in this first version. Candidate creation is atomic and
-no-clobber; interrupted partial evidence is not a saved candidate.
+The intrinsic page retains its advanced offline head-observation import, bounded
+to 2 MB and 256 observations. Original upload bytes/hash are retained. Imported
+timing, FK and intrinsics provenance are operator-supplied and not automatically
+verified or bound to web-solved intrinsics. The intrinsic page does not acquire
+robot-state pairs; qualified stationary pairing belongs to the teleoperation
+workspace. Intrinsic sessions are bounded to 64 images and 256 MiB; interrupted
+or cancelled evidence is retained, with no implicit resumption or deletion.
 
 ## Offline external-pose CLI
 
-This tool never opens cameras, CAN, or motors, and never installs its output.
-Install the optional scientific/video dependencies in an offline environment.
-The indexed detector additionally needs OpenCV with `aruco.CharucoDetector`.
+This tool opens neither camera nor CAN and never installs its output:
 
 ```sh
 openarm-runtime camera-calibrate \
@@ -164,54 +119,33 @@ openarm-runtime camera-calibrate \
   --output /external/new-extrinsics-estimate.json
 ```
 
-## Observation contract
+Input `openarm.camera-calibration.observations.v1` requires units `m`,
+`joint_state_source: measured_feedback`, mode `head` or `wrist`, and nonempty
+`base_frame`, `tool_frame`, `camera_name`, `robot_model_sha256`, `intrinsics_source`.
+Samples contain rigid 4×4 `base_from_tool`, `camera_from_board`, RMS ≤1.5 px,
+and same-clock `image_captured_at_s`/`robot_received_at_s` within 50 ms. Do not
+manufacture these from receive-only recordings. Teleoperation uses its explicit
+stationary-bracket schema instead of fabricated timestamp pairs.
 
-The input JSON has schema `openarm.camera-calibration.observations.v1`, `units`
-`m`, `joint_state_source` `measured_feedback`, and `mode` `head` or `wrist`.
-Also provide `base_frame`, `tool_frame`, `camera_name`, `robot_model_sha256`,
-and `intrinsics_source` (nonempty provenance strings).
-
-Each item in `samples` contains:
-
-- `base_from_tool`: measured-feedback FK as a rigid 4×4 transform.
-- `camera_from_board`: metric indexed board PnP, also a rigid 4×4 transform.
-- `reprojection_rms_px`: nonnegative, at most 1.5 pixels.
-- `image_captured_at_s` and `robot_received_at_s`: finite timestamps on the same
-  clock, paired within 50 ms. Camera HTTP receipt time is not an exposure-time
-  measurement; do not silently relabel timestamps from old recordings.
-
-For **wrist**, rigidly attach the camera to the tool and keep the board fixed in
-the base frame. For **head**, keep the camera fixed relative to base and rigidly
-attach the board to the tool. Do not mix installations or move the board/camera
-independently inside one fit. An actively moving head needs its own measured
-kinematic frame; this fixed-head fit does not cover it.
-
-Capture at least eight diverse views with two-axis rotation excitation, varying
-positions and ample image coverage. Physical capture and movement remain
-operator-controlled. A fit rejects degenerate motion and consistency RMS above
-5 mm or 0.03 rad; it does not quietly delete outliers.
+For head cameras, fix camera to base and board to tool. For wrist cameras, fix
+camera to tool and board to base. A freely hand-held board cannot determine head
+extrinsics without another measured reference. This fit does not cover an
+actively moving head. Use at least eight diverse views and two-axis rotation
+excitation; consistency RMS above 5 mm or 0.03 rad rejects the fit. Validation
+never changes fitting; thresholds are not tuned to make a run pass.
 
 ## Indexed board extraction API
 
 `openarm_runtime.camera_calibration.charuco_pose(image_rgb, K, distortion,
-board_spec)` accepts a recorded RGB uint8 image. Specify `squares_x`, `squares_y`,
-`square_size_m`, `marker_size_m`, and `dictionary` (`DICT_4X4_50`,
-`DICT_5X5_100`, or `DICT_6X6_250`). Use the exact printed board geometry and
-calibrated intrinsics for that image size/crop; do not infer physical square
-dimensions from image pixels. The result includes uniquely indexed corners,
-`camera_from_board` and reprojection RMS. Pair it with actual measured robot FK
-and exposure timestamps before fitting. No recorded-episode timestamp or FK
-provenance is inferred automatically.
+board_spec)` accepts RGB uint8 and exact `squares_x`, `squares_y`, `square_size_m`,
+`marker_size_m`, `dictionary` (`DICT_4X4_50`, `DICT_5X5_100`, `DICT_6X6_250`).
+It returns indexed corners, metric `camera_from_board` and RMS. Use measured
+print geometry and intrinsics for the exact image mode. Lower-level `board_pose`
+requires an already consistently ordered inner-corner grid; symmetric checkerboard
+detection alone is not a stable board frame across rotated views.
 
-The lower-level `board_pose` helper expects an already consistently ordered
-inner-corner grid; ordinary symmetric chessboard detections alone do not establish
-a stable board frame across rotated views.
-
-## Output boundary
-
-Output is `tool_from_camera` for wrist or `base_from_camera` for head, with status
-`estimated_not_independently_verified`. Validate held-out observations, frame
-conventions, board scale, TCP and image intrinsics independently before updating
-an external machine profile. Low fitting residual alone is not physical
-calibration verification. Synthetic tests and nominal simulation cameras do not
-replace that work.
+Results are `tool_from_camera` for wrist or `base_from_camera` for head, marked
+`estimated_not_independently_verified`, `installed: false`. Low fitting or
+held-out reprojection is not independent physical/metric verification. Verify
+scale, image geometry, frames, TCP and physical references before changing an
+external machine profile. Synthetic tests do not replace acceptance.

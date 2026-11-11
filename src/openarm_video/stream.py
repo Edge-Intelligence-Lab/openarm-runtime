@@ -225,6 +225,8 @@ def create_app(capture):
             mode=dict(width=config.width, height=config.height, fps=config.fps),
             simulation=bool(getattr(capture, 'simulate', False)),
             png_sha256=hashlib.sha256(data).hexdigest())
+        if frame.acquisition is not None:
+            metadata['acquisition'] = dict(frame.acquisition, png_sha256=metadata['png_sha256'])
         return Response(data, content_type='image/png', headers={
             'Cache-Control':'no-store', 'X-Calibration-Metadata':json.dumps(metadata, ensure_ascii=True)})
 

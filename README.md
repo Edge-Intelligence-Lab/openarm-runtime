@@ -13,12 +13,13 @@ stream updates and writer queues, then camera/tactile/joint playback from native
 collection archives. Recording controls remain in the existing teleoperation
 page. See [collection visualization](docs/platform.md#collection-visualization).
 
-The platform includes **策略可视化** to the platform at `/#policy`
-(standalone same-origin page: `/policy`). It displays submitted targets and
-recorded feedback separately, inference latency and a joint timeline. Built-in
-simulated policies and episode replay work in `--attach-only` mode. This page
-uses the version 1 policy contracts; it does not launch the Classic motor backend.
-See [platform policy visualization](docs/platform.md#policy-visualization).
+The platform's **模型与执行** workspace at `/#policy` (same-origin `/policy`)
+loads registered predictors, tests configured sample inputs without execution,
+and starts a bounded policy session only after operator confirmation. It reuses
+the policy CLI and motion handover, rather than adding another robot controller.
+Simulation and historical replay remain separate; `--attach-only` disables model
+operations. See [the model deployment workflow](docs/models-web.md) and
+[historical policy visualization](docs/platform.md#policy-visualization).
 
 Operator-driven [teleoperation data collection](docs/collection.md) adds explicit
 episode recording/review, native-time robot/camera/tactile archives, quality checks
@@ -139,6 +140,14 @@ To develop the runtime on its own, use `uv sync --locked` in this repository;
 see [contributing](CONTRIBUTING.md).
 
 ## Use all modules through one address
+
+For operator-positioned head-camera alignment, use
+[leader/follower teleoperation calibration](docs/teleop-head-calibration.md): the
+human controls pose and grip; calibration only samples and solves.
+
+The passive [MuJoCo backend](docs/simulation.md) isolates hardware and outputs;
+it has no autonomous calibration. Physical leader input and tactile simulation
+are not wired into it, and it is not a calibrated digital twin.
 
 The **OpenArm Platform** combines motor control, teleoperation, tactile and
 vision at **http://127.0.0.1:8888**. NiceGUI provides the dashboard; its

@@ -16,7 +16,8 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 class NumpyHTTP:
-    def __init__(self, url, timeout_s=.3, max_response_bytes=1_000_000, expected_model_sha256=None):
+    def __init__(self, url, timeout_s=.3, max_response_bytes=1_000_000,
+                 expected_identity=None):
         from ..contracts import finite
         address = urlsplit(url)
         if (address.scheme != "http" or address.hostname not in ("127.0.0.1", "::1", "localhost")
@@ -26,7 +27,10 @@ class NumpyHTTP:
             raise ValueError("Inference transport requires bounded loopback HTTP")
         self.url, self.timeout = url, timeout_s
         self.limit = max_response_bytes
-        self.expected_hash = expected_model_sha256
+        if expected_identity is not None and (not isinstance(expected_identity, dict)
+                or not expected_identity):
+            raise ValueError('Expected model identity must be a nonempty mapping')
+        self.expected_identity = dict(expected_identity or {})
 
     def reset(self, context):
         self.opener = build_opener(ProxyHandler({}), _NoRedirect())
@@ -39,8 +43,8 @@ class NumpyHTTP:
         info = json.loads(data)
         if info.get("ready") is not True or not isinstance(info.get("model"), dict):
             raise ValueError("Model service is not ready")
-        if self.expected_hash is not None and info["model"].get("model_sha256") != self.expected_hash:
-            raise ValueError("Inference service model SHA256 mismatch")
+        if any(info['model'].get(key) != value for key, value in self.expected_identity.items()):
+            raise ValueError('Inference service identity mismatch')
         self.metadata = {"transport": "npz_loopback_http", "url": self.url, "model": info["model"]}
 
     def predict(self, inputs):

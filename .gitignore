@@ -10,3 +10,4 @@ dist/
 .env.*
 *.log
 *.whl
+.openchamber/screenshots/

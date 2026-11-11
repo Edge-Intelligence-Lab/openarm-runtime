@@ -36,8 +36,8 @@ Platform framework tests run with
 `python -m unittest discover -s tests -p 'test_platform*.py'` after installing
 `.[platform]`. They use fake services and local test upstreams, never hardware.
 Core-only tests skip framework integration checks while still checking passive
-imports, configuration and subprocess ownership. CI validates both the core
-wheel and the optional platform extra outside the checkout. Browser acceptance
+imports, configuration and subprocess ownership. Tests are run manually as needed;
+there is no automatic push, PR or release test suite. Browser acceptance
 should exercise persistent views, real Viser WebSocket events, both nested
 tactile viewers and camera images through one port using software fixtures.
 
@@ -45,6 +45,11 @@ Tests must not open physical hardware. Test behavior at transport boundaries,
 including exception cleanup, rather than copying implementation details.
 Record actual hardware checks separately in [validation](docs/validation.md).
 Keep device configuration, calibration, logs and cached assets outside Git.
+
+Head and wrist camera parameters have a single source on Hugging Face. `configs/cameras/`
+keeps only a repository/commit/path reference, without parameter copies, file
+hashes or per-file sizes. Raw evidence and machine/device configuration stay
+external. See `configs/cameras/README.md` for usage and validity limits.
 
 ## API changes
 
@@ -58,11 +63,11 @@ an editable install is for joint development, not a reproducible deployment.
 1. Update the version in `pyproject.toml`, `src/openarm_runtime/__init__.py` and
    version assertions in `tests/test_public_api.py`; update the changelog and
    README install tag. Run `uv lock` if package metadata/dependencies changed.
-2. Run tests and `uv build`. Install the wheel in a fresh environment and run the
-   tests with `OPENARM_EXPECT_INSTALLED=1`. CI performs this on Linux and macOS.
-3. Commit, push and verify the CI result. Tag the tested commit `vX.Y.Z` and push
-   that tag. The release workflow validates the tag/version, rebuilds and tests
-   the wheel, then publishes a GitHub release with the changelog, wheel, source
+2. Run only the local checks relevant to the change, as needed. Local tests remain
+   available; a full regression suite or cross-platform CI is not a release gate.
+3. Commit and push. Tag the release commit `vX.Y.Z` and push that tag. The release
+   workflow validates the tag/version, builds the distributions without running
+   tests, then publishes a GitHub release with the changelog, wheel, source
    distribution and SHA256 checksums from that same commit.
 4. Update downstream pins explicitly after acceptance. A release does not require
    restarting a user's live hardware services.

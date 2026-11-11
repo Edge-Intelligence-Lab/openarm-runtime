@@ -84,6 +84,27 @@ class Teleoperation:
         self.cartesian_factory = cartesian_factory
         self.cartesian = {}
         self.mode = "joint"
+        self.head_calibration = None
+        self.head_calibration_view = None
+        self.run_id = None
+
+    def _observe(self, side, event):
+        if self.collection:
+            self.collection.emit(f"robot/{side}", event['dispatch_started_at'], event)
+        if self.head_calibration is not None:
+            self.head_calibration.observe(side,event,owner=self.owner,
+                generation=(self.run_id,self.takeover_generation),
+                following=self.home.phase=='following' and side in self.origins)
+
+    def _track(self,side,control,targets):
+        calibration=self.head_calibration
+        if calibration is None:
+            control.track(targets)
+        else:
+            # Mount confirmation and its feedback snapshot are atomic relative
+            # to dispatch. No second owner or hardware command path is created.
+            with calibration.reference_lock:
+                control.track(calibration.hold_targets(side,targets))
 
     @property
     def busy(self):
@@ -116,6 +137,7 @@ class Teleoperation:
                 self.home.request()
             self.origins = {}
             self.takeover_generation = 0
+            self.run_id = uuid.uuid4().hex
             self.active_mapping, self.active_readers = mapping, selected
             if self.collection:
                 from openarm_runtime import __version__
@@ -194,6 +216,8 @@ class Teleoperation:
                 raise RuntimeError("Teleoperation shutdown timed out")
         if self.collection:
             self.collection.close()
+        if self.head_calibration_view is not None:
+            self.head_calibration_view.close()
 
     def _run(self, mapping, readers):
         report = None
@@ -252,8 +276,8 @@ class Teleoperation:
                         control = stack.enter_context(ArmHold(
                             bus, cancelled, lambda event: record(side, event),
                             lambda states: None, tracking=True, gravity=gravity,
-                            observe=(lambda event: self.collection.emit(f"robot/{side}", event["dispatch_started_at"], event))
-                            if self.collection else None))
+                            observe=(lambda event: self._observe(side,event))
+                             if self.collection or self.head_calibration is not None else None))
                         # Cancel peer loops before this arm's disable readback waits.
                         stack.enter_context(stop_peers_on_error())
                         period = 1 / self.profile.rate_hz
@@ -321,7 +345,7 @@ class Teleoperation:
                             else:
                                 # Keep the first ready arm serviced while its peer ramps.
                                 targets = dict(control.base)
-                            control.track(targets)
+                            self._track(side,control,targets)
                             self.cancel.wait(max(0, period - (time.monotonic() - now)))
                 except BaseException as exc:
                     with state_lock:
@@ -346,6 +370,8 @@ class Teleoperation:
                     pass
         finally:
             try:
+                if self.head_calibration is not None:
+                    self.head_calibration.ended()
                 if self.collection:
                     self.collection.ready = False
                     for reader in readers.values():
@@ -366,21 +392,29 @@ class Teleoperation:
                 self.lock.release()
 
 
-def attach(server, profile, mapping, readers, report_root, mapping_lock, calibration_busy, saved, collection=None):
+def attach(server, profile, mapping, readers, report_root, mapping_lock, calibration_busy, saved, collection=None,
+           head_calibration_profile=None,head_calibration_root=None,head_video_port=5003):
+    if head_calibration_profile is not None and collection is not None:
+        raise ValueError('标定与示教数采必须使用不同工作区')
     import os
     factory = None
     if os.environ.get("OPENARM_CARTESIAN_PROFILE"):
         from .cartesian_teleop import load_factory
         factory = load_factory(os.environ["OPENARM_CARTESIAN_PROFILE"])
     session = Teleoperation(profile, mapping, readers, report_root, collection, cartesian_factory=factory)
-    with server.gui.add_folder("真实从臂跟随"):
-        server.gui.add_markdown("从臂回零后，以主臂当前位置开始相对跟随，无需精确对齐主臂。回零仅移动从臂七关节，夹爪保持；停止或页面断开会失能。")
+    if head_calibration_profile is not None:
+        if head_calibration_root is None:raise ValueError('Head calibration requires an explicit evidence root')
+        from openarm_platform.teleop_calibration import attach as attach_head_calibration
+        attach_head_calibration(server,session,head_calibration_profile,head_calibration_root,head_video_port)
+    with server.gui.add_folder("标定姿态控制" if head_calibration_profile else "真实从臂跟随",order=-100):
+        server.gui.add_markdown("从当前姿态接管，主臂控制关节与夹爪。标定不发运动命令。" if head_calibration_profile else
+            "从臂回零后，以主臂当前位置开始相对跟随，无需精确对齐主臂。回零仅移动从臂七关节，夹爪保持；停止或页面断开会失能。")
         modes = ("末端 IK · 虚拟主臂", "旧版 · 逐关节") if factory else ("旧版 · 逐关节",)
         mode = server.gui.add_dropdown("控制方式", options=modes, initial_value=modes[0])
         if factory:
             server.gui.add_markdown("末端 IK：小主臂驱动虚拟大臂末端，再求从臂关节；不是小主臂真实 TCP 映射。可从当前静止姿态直接接管，无需回零。尚无桌面避障，请保持空旷。")
-        choice = server.gui.add_dropdown("跟随机械臂", options=("双臂", "右臂", "左臂"), initial_value="左臂" if factory else "双臂")
-        home = server.gui.add_button("① 从臂缓慢回零")
+        choice = server.gui.add_dropdown("跟随机械臂", options=("双臂", "右臂", "左臂"), initial_value="左臂" if factory or head_calibration_profile else "双臂")
+        home = server.gui.add_button("① 从臂缓慢回零",visible=head_calibration_profile is None)
         start = server.gui.add_button("② 开始相对跟随" if collection else "开始跟随")
         stop = server.gui.add_button("停止 · 失能", color="red")
         status = server.gui.add_markdown(session.message)
@@ -402,7 +436,7 @@ def attach(server, profile, mapping, readers, report_root, mapping_lock, calibra
                     session.resume(event.client.client_id)
                 elif mode.value == "末端 IK · 虚拟主臂":
                     session.start(event.client.client_id, sides, mode="cartesian")
-                elif collection:
+                elif collection and head_calibration_profile is None:
                     raise ValueError("请先点击从臂缓慢回零")
                 else:
                     session.start(event.client.client_id, sides)
@@ -436,14 +470,15 @@ def attach(server, profile, mapping, readers, report_root, mapping_lock, calibra
 
     def refresh():
         refresh_collection()
+        if session.head_calibration_view is not None:session.head_calibration_view.refresh()
         status.content = session.message
         phase = session.home.phase if session.home else "idle"
-        direct_ik = mode.value == "末端 IK · 虚拟主臂" and not session.busy
+        direct_ik = (mode.value == "末端 IK · 虚拟主臂" or head_calibration_profile is not None) and not session.busy
         start.disabled = calibration_busy() or not saved() or (not direct_ik and (phase != "holding" if collection else session.busy and phase != "holding"))
         start.label = "开始末端 IK 跟随" if mode.value == "末端 IK · 虚拟主臂" else ("② 开始相对跟随" if collection else "开始跟随")
         home.disabled = (calibration_busy() or not saved() or (session.busy and phase not in ("following", "holding"))
                          or bool(collection and collection.episode is not None))
-        choice.disabled = session.busy
+        choice.disabled = session.busy or head_calibration_profile is not None
         mode.disabled = session.busy
 
     return session, refresh

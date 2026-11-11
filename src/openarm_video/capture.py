@@ -11,6 +11,9 @@ from .camera import CameraConfig, Frame, OpenCVCamera, SimulationCamera
 
 
 def _source(config):
+    if config.capture_backend == 'v4l2_timestamped':
+        from .timed_rgb import TimedRGBCamera
+        return TimedRGBCamera(config)
     if config.kind == "depth":
         from .depth import OpenNIDepthCamera
         return OpenNIDepthCamera(config)

@@ -249,6 +249,10 @@ def guarded(name,*args,**kwargs):
     return original(name,*args,**kwargs)
 builtins.__import__=guarded
 import openarm_runtime.camera_intrinsics
+import openarm_runtime.stationary_calibration
+import openarm_video.timed_rgb
+import openarm_platform.calibration_source
+import openarm_platform.teleop_calibration
 import openarm_platform.camera_calibration
 import openarm_platform.camera_calibration_view
 """

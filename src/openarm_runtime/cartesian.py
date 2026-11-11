@@ -63,7 +63,8 @@ class KinematicChain:
     Model coordinates = signs * input radians + offsets. TCP is a fixed transform
     from the named URDF frame, not a guessed gripper centre.
     """
-    def __init__(self, urdf, *, sha256, joints, signs, offsets, locked, frame, tcp):
+    def __init__(self, urdf, *, sha256, joints, signs, offsets, locked, frame, tcp,
+                 encoder_tolerance_rad=0.):
         import numpy as np
         import pinocchio as pin
         source = Path(urdf).read_bytes()
@@ -76,6 +77,9 @@ class KinematicChain:
         if not np.isin(self.signs, [-1, 1]).all():
             raise ValueError("Signs must be -1 or +1")
         self.offsets = np.array(vector(offsets, len(names), "offsets"))
+        self.encoder_tolerance = vector([encoder_tolerance_rad], 1, 'encoder tolerance')[0]
+        if not 0 <= self.encoder_tolerance <= math.radians(.5):
+            raise ValueError('Encoder FK tolerance must be within 0..0.5 degrees')
         full = pin.buildModelFromXML(source.decode())
         if set(names) & set(locked) or set(names) | set(locked) != set(full.names[1:]):
             raise ValueError("Every movable joint must be mapped or explicitly locked")
@@ -97,13 +101,16 @@ class KinematicChain:
         self.data = self.model.createData()
         self.metadata = dict(urdf_sha256=sha256, joints=names, signs=list(signs),
                              offsets=list(offsets), locked=dict(locked), frame=frame,
-                             tcp=pose(tcp).tolist())
+                              tcp=pose(tcp).tolist())
+        if self.encoder_tolerance:
+            self.metadata['encoder_limit_tolerance_rad'] = self.encoder_tolerance
 
     def configuration(self, angles):
         import numpy as np
         q = np.empty(self.model.nq)
         q[self.indices] = self.signs * vector(angles, len(self.indices), "joint angles") + self.offsets
-        if (q < self.model.lowerPositionLimit - 1e-9).any() or (q > self.model.upperPositionLimit + 1e-9).any():
+        if ((q < self.model.lowerPositionLimit - self.encoder_tolerance - 1e-9).any()
+                or (q > self.model.upperPositionLimit + self.encoder_tolerance + 1e-9).any()):
             raise ValueError("Joint angle outside URDF limits")
         return q
 

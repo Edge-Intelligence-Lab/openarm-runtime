@@ -182,7 +182,18 @@ actions remain unsupported; never relabel position vectors as another action kin
 
 ## Recording and replay
 
-EpisodeRecorder saves JSONL events and lossless, non-pickle `.npy` sidecars. It
+The policy CLI defaults to `--record-mode summary`. `CompactEpisodeRecorder`
+saves only `summary.json`: context/model identity, event counts, latency aggregates,
+one terminal Cartesian snapshot and bounded lifecycle/error/cleanup events. It
+does not save images, chunks, action histories or replay arrays. `task_success`
+remains null until an operator judges the real outcome; normal session shutdown
+is not task success. Missing terminal events leave the receipt incomplete. A
+complete receipt can still report failed execution or cleanup. This mode is not
+input to `replay_observations`, training exporters or full-trace viewers.
+
+For an explicitly requested detailed diagnostic, pass `--record-mode full`.
+The existing Python `EpisodeRecorder` API remains full recording: it saves JSONL
+events and lossless, non-pickle `.npy` sidecars. It
 preserves context, observation histories/times, chunks, submitted targets and errors.
 CLI Classic runs also record preflight/enable/disable events. Submitted targets are
 not measured motor feedback. Storage errors terminate the session. Writes are

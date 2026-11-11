@@ -92,7 +92,8 @@ class FixedJointPreparation:
             raise ValueError("TCP arrival requires an explicit robot FK capability")
         if self.spec.kind != POSITION or self.spec.names != expected:
             raise ValueError("Preparation needs an explicit single-arm joint-position capability")
-        if (hasattr(robot, "speed") and any(v > robot.speed for v in self.speed[:7])) or (
+        speed = getattr(robot, 'preparation_speed', getattr(robot, 'speed', None))
+        if (speed is not None and any(v > speed for v in self.speed[:7])) or (
                 hasattr(robot, "grip_speed") and self.speed[7] > robot.grip_speed):
             raise ValueError("Preparation speed exceeds the robot capability")
         for waypoint in self.waypoints:

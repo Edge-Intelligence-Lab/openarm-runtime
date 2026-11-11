@@ -22,12 +22,15 @@ class ModelPolicy:
     format/normalization. Decoder owns action semantics, not motor control.
     Future ONNX, remote or other policy-family backends use the same three seams.
     """
-    def __init__(self, model, observation, action, period_s=.05, lead_s=0.):
+    def __init__(self, model, observation, action, period_s=.05, lead_s=0., diagnostic_inputs=False):
         if not finite(period_s) or period_s <= 0 or not finite(lead_s) or lead_s < 0:
             raise ValueError("Invalid model action timing")
         self.specs = (model, observation, action)
         self.period_s, self.lead_s = period_s, lead_s
         self.components = []
+        if type(diagnostic_inputs) is not bool:
+            raise ValueError('diagnostic_inputs must be boolean')
+        self.diagnostic_inputs = diagnostic_inputs
 
     def reset(self, context):
         if self.components:
@@ -53,25 +56,32 @@ class ModelPolicy:
                 raise ValueError('Execution-aware encoder requires a checkpoint publishing its state width')
             if width is not None and encoded_width is not None and width != encoded_width:
                 raise ValueError('Checkpoint and observation encoder state widths differ')
+            encoder_meta = getattr(encoder, 'metadata', {})
+            image_key = 'image_contract'
+            if image_key in model_meta or image_key in encoder_meta:
+                for meta in (model_meta, encoder_meta):
+                    if not isinstance(meta.get(image_key), dict) or not meta[image_key]:
+                        raise ValueError('Both model and encoder must publish an image contract')
+                if model_meta[image_key] != encoder_meta[image_key]:
+                    raise ValueError('Checkpoint and observation encoder image contracts differ')
             decoder_meta = getattr(decoder, 'metadata', {})
             if not isinstance(decoder_meta, dict):
                 raise ValueError('Invalid action decoder metadata')
-            key = 'action_contract_sha256'
+            key = 'action_contract'
             if key in model_meta or key in decoder_meta:
                 for meta in (model_meta, decoder_meta):
-                    digest = meta.get(key)
-                    if (not isinstance(digest, str) or len(digest) != 64
-                            or any(c not in '0123456789abcdef' for c in digest)):
-                        raise ValueError('Both model and decoder must publish valid action_contract_sha256')
+                    if not isinstance(meta.get(key), dict) or not meta[key]:
+                        raise ValueError('Both model and decoder must publish an action contract')
                 if model_meta[key] != decoder_meta[key]:
-                    raise ValueError('Checkpoint and action decoder contract SHA256 differ')
+                    raise ValueError('Checkpoint and action decoder contracts differ')
         except BaseException:
             self.close()
             raise
 
     def infer(self, observation):
         model, encoder, decoder = self.components
-        output = model.predict(encoder.encode(observation))
+        inputs = encoder.encode(observation)
+        output = model.predict(inputs)
         steps = tuple(tuple(float(v) for v in row) for row in decoder.decode(output, observation))
         for row in steps:
             self.context.action.validate(row)
@@ -80,7 +90,13 @@ class ModelPolicy:
                            kind=self.context.action.kind,
                            diagnostics={"model": getattr(model, "metadata", {}),
                                         "observation_adapter": getattr(encoder, "metadata", {}),
-                                        "action_adapter": getattr(decoder, "metadata", {}),
+                                         "action_adapter": getattr(decoder, "metadata", {}),
+                                         **({'encoded_inputs': inputs,
+                                             'input_captured_at': observation.captured_at,
+                                             'input_sources': {key: {'sequence': samples[-1].sequence,
+                                                 'received_at': samples[-1].received_at}
+                                                 for key, samples in observation.streams.items() if samples}}
+                                            if self.diagnostic_inputs else {}),
                                         "raw_actions": output.tolist() if hasattr(output, "tolist") else output})
 
     def close(self):

@@ -19,7 +19,7 @@ MAX_WS_MESSAGE = 64 * 1024 * 1024
 
 def routes(config):
     result = {}
-    for page in config.pages:
+    for page in (*config.pages,*(p for p in config.support if p.id=='head_alignment')):
         if page.path is not None:
             continue
         prefix = f'/apps/{page.id}'

@@ -1,0 +1,16 @@
+{
+  "schema": "openarm.camera-references.v1",
+  "repository": "tacpilot/tacpilot",
+  "repo_type": "model",
+  "revision": "e6e979a1fa9bd3bc40cdeb78acb68f91d23d3759",
+  "cameras": {
+    "head": {
+      "path": "assets/simulation/cameras/head/calibration.json"
+    },
+    "wrist": {
+      "path": "assets/simulation/cameras/wrist/calibration.json"
+    }
+  },
+  "automatic_device_selection": false,
+  "automatic_hardware_activation": false
+}

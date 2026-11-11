@@ -1,5 +1,9 @@
 # Reusable model adapters and first upright deployment
 
+For the reusable operator workflow in the existing unified web entry, see
+[模型与执行](models-web.md): a trusted model catalogue, separate load/sample-test
+and execution states, manual confirmation, shared motion ownership and unload.
+
 The model integration belongs to **openarm-runtime**, not a duplicate robot loop
 inside a research repository. Research code still owns training and benchmarks.
 No TacPilot installation is needed by these adapters. Imports open no devices,
@@ -32,13 +36,22 @@ The existing `ImportedPolicy` and `ChunkPolicyAdapter` APIs remain supported.
 ## Initial built-ins
 
 - `models.act:TacPilotACT`: strict local full-policy load for the released
-  state8/action7/H100 ACT format. Complete safetensors, original moments and the
-  optional fixed-relative orientation adapter are required; unknown schemas fail.
+  state8/action7/H100 ACT format, including checkpoint-bound rotation6d internal
+  features (width11, external state remains width8). Complete safetensors, original
+  moments and the optional orientation adapter are required; unknown schemas fail.
   It does **not** implement generic LeRobot processor formats or fetch assets.
 - `models.tacpilot:UprightObservation`: two required BGR streams, explicit RGB
   conversion and area resize to 256². Optional per-stream `[x,y,w,h]` crops are
   recorded in the caller's profile. Measured task TCP -> xyz/rotvec + two physical
   half-gaps in metres. No object position, task phase, depth or tactile input.
+  A current-camera model additionally requires `image_contract` and
+  `head_calibration` paths in its encoder kwargs: native1280×720 head BGR is
+  converted to RGB, undistorted with the selected OpenCV5 K/distortion and
+  `new_K=K`, then full-frame Pillow bilinear resized to256². No crops or pre-resized
+  head previews are accepted. Wrist RGB uses full-frame bilinear resize; wrist
+  calibration and real/sim visual equivalence remain unverified. The legacy path
+  retains its existing area resize. Predictor and encoder publish matching image
+  contract objects before robot startup, including across the HTTP model service.
 - `models.tacpilot:UprightActions`: task-frame translation increments at 0.02m
   scale, left-multiplied rotvec increments at 0.1rad scale and +1=closed gripper.
   Saturation to [-1,1] is explicit, matching simulation. Opening endpoints are
@@ -46,7 +59,7 @@ The existing `ImportedPolicy` and `ChunkPolicyAdapter` APIs remain supported.
   goals from the observation's last dispatched goal; unexecuted predictions never
   advance hidden reference state.
 - `models.http:NumpyHTTP`: bounded no-pickle NPZ loopback transport. Performs a
-  health/model-hash check during reset, before robot startup; disables environment
+  health and optional declared identity checks during reset, before robot startup; disables environment
   proxies and redirects. A remote GPU requires an externally managed SSH tunnel.
 
 `ModelPolicy` records raw predictions and predictor/checkpoint identity in chunk
@@ -98,6 +111,25 @@ goals remain separately observable. Constraint-induced lag remains a deployment
 change, not an assertion of identical simulation physics.
 
 ## Deployment profiles and environment ownership
+
+The 2026-11-11 current-camera upright candidate is a separate model from the
+historical example below: selected step45000, weights SHA256
+`71197475f4540873de0df7462c44855555fa4a1b3d1e93e541b5927d93f1e08e`,
+external state8/rotation6d feature11/action7/H100. Its existing simulation summary
+reports30/300 strict successes (10%); this is not reliable hardware capability.
+Do not overlay it on the old deployment directory or reuse an old orientation
+adapter. Three fixed synthetic inputs produced byte-identical full100×7 outputs
+between the updated runtime adapter and TacPilot source on CPU; this does not
+validate real images, TCP/table/gripper calibration, stop latency or task success.
+Prepare software and observation-only checks first; only an on-site operator
+starts a bounded physical trial after live preflight. No physical trial or remote
+installation is established by the offline adapter checks.
+
+Policy CLI recordings now default to `--record-mode summary`: one compact
+`summary.json`, no RGB, predicted/action archives or replay sidecars. It preserves
+identity, counters, latency aggregates, a terminal numeric snapshot and lifecycle/
+cleanup evidence, with physical task success unknown until judged by the operator.
+Use `--record-mode full` only for an explicitly bounded diagnostic purpose.
 
 Copy `examples/upright-model.example.json` and
 `examples/upright-policy.example.json` **outside Git**. They are templates, not
@@ -253,14 +285,12 @@ integration across predictions. Repeated identical goals converge without drift.
 Gripper sign, calibrated endpoints and optional nonlinear curve are identical to
 `UprightActions`; no object truth or task phase is read. Both sides are supported.
 
-Decoder metadata publishes `action_contract_sha256` over the **exact JSON bytes**.
-`TacPilotACT` publishes the same optional field when its checkpoint directory
-contains `action-contract.json`, retaining the ordinary file hashes and without
-interpreting action semantics. `ModelPolicy` unwraps HTTP `model` metadata and,
-if either predictor or decoder publishes a contract fingerprint, requires both
-valid SHA256 fingerprints to match before robot startup; mismatch triggers normal
-component cleanup. Neither publishing a fingerprint preserves legacy behavior.
-Even whitespace changes require a matching checkpoint/decoder file identity.
+Decoder metadata publishes the parsed `action_contract` object. `TacPilotACT`
+publishes the same optional field from `action-contract.json`, without interpreting
+action semantics or hashing files. `ModelPolicy` unwraps HTTP `model` metadata and,
+if either side publishes a contract, requires both contract objects to match
+before robot startup; mismatch triggers normal component cleanup. If neither
+publishes a contract, legacy behavior is retained. JSON whitespace has no effect.
 
 **A matching executor governor is required, not optional for this decoder.**
 `PolicySession` obtains generic `Context.execution` capabilities from the actual

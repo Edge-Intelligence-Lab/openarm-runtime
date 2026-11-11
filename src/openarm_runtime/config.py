@@ -52,12 +52,17 @@ class Profile:
                                for side, value in data["gravity"].items()}
         return cls(**data)
 
-    def make_gravity(self, side):
+    def make_gravity(self, side, *, required=False):
         self.interface(side)
         if not self.gravity or side not in self.gravity:
+            if required:
+                raise ValueError(f'{side}: active gravity compensation is required; configure gravity in the shared robot profile')
             return None
         from .gravity import load_gravity
-        return load_gravity(self.gravity[side], side=side)
+        compensation = load_gravity(self.gravity[side], side=side)
+        if required and compensation.mode != 'active':
+            raise ValueError(f'{side}: active gravity compensation is required; shadow mode does not apply torque')
+        return compensation
 
     def interface(self, side: str):
         if side not in ("left", "right"):

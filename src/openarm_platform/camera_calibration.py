@@ -115,9 +115,12 @@ def borrow_frame(port, name):
 
 
 class CalibrationWorkspace:
-    def __init__(self, root, video_port, *, clock=time.monotonic, fetch=borrow_frame):
+    def __init__(self, root, video_port, *, clock=time.monotonic, fetch=borrow_frame,
+                 allowed_cameras=None, intrinsics_only=False):
         self.root = Path(root).expanduser().resolve()
         self.video_port, self.clock, self.fetch = video_port, clock, fetch
+        self.allowed_cameras = None if allowed_cameras is None else tuple(allowed_cameras)
+        self.intrinsics_only = intrinsics_only
         self.lock = threading.RLock()
         self.owner = None
         self.epoch = 0
@@ -158,6 +161,7 @@ class CalibrationWorkspace:
                 except ValueError:
                     pass
             return dict(state=self.state, mine=self.owner == owner, busy=self.busy,
+                        camera_name=getattr(self, 'camera_name', None), identity=copy.deepcopy(self.identity),
                         session_id=self.session_id, samples=copy.deepcopy(self.samples),
                         result=copy.deepcopy(self.result), head=copy.deepcopy(self.head),
                         realtime_extrinsics=False,
@@ -169,6 +173,8 @@ class CalibrationWorkspace:
             raise ValueError('无效的会话或相机名称')
         if camera_model != 'pinhole':
             raise ValueError('首版仅支持普通针孔镜头，不支持鱼眼')
+        if self.allowed_cameras is not None and camera_name not in self.allowed_cameras:
+            raise ValueError('请选择此工作区支持的相机：'+', '.join(self.allowed_cameras))
         board(spec)
         with self.lock:
             if self.closed or self.busy:
@@ -181,7 +187,7 @@ class CalibrationWorkspace:
             path.mkdir(mode=0o700)
             atomic_json(path/'session.json', dict(schema='openarm.camera-calibration.session.v1',
                 session_id=session_id, camera_name=camera_name, board_spec=spec,
-                camera_model=camera_model, realtime_extrinsics=False))
+                camera_model=camera_model, realtime_extrinsics=False, intrinsics_only=self.intrinsics_only))
             self.epoch += 1
             self.owner, self.session_id = owner, session_id
             self.spec, self.camera_name = copy.deepcopy(spec), camera_name
@@ -259,6 +265,8 @@ class CalibrationWorkspace:
                 self.busy = False
 
     def import_head(self, owner, raw):
+        if self.intrinsics_only:
+            raise ValueError('腕部内参工作区不接受头部外参导入')
         epoch = self._begin(owner)
         try:
             if self.spec.get('type') == 'checkerboard':
@@ -282,6 +290,34 @@ class CalibrationWorkspace:
                 atomic_json(path/'estimate.json', result)
                 self.head = dict(result, evidence_id=path.name)
                 return copy.deepcopy(self.head)
+        finally:
+            with self.lock:
+                self.busy = False
+
+    def preview_intrinsics(self, owner):
+        """Undistort the last accepted evidence frame; never fetch or open devices."""
+        epoch = self._begin(owner)
+        try:
+            with self.lock:
+                if self.result is None or not self.samples:
+                    raise ValueError('请先计算内参，再查看去畸变对照')
+                sample, result = copy.deepcopy(self.samples[-1]), copy.deepcopy(self.result)
+                path = self._directory()/sample['id']/'image.png'
+                if path.is_symlink() or path.resolve() != path or path.stat().st_size > MAX_PNG:
+                    raise ValueError('原图证据路径不可用')
+                raw = path.read_bytes()
+            rgb = decode_frame(raw, sample['metadata'])
+            import cv2
+            import numpy as np
+            K = np.asarray(result['matrix'], dtype=float)
+            distortion = np.asarray(result['distortion'], dtype=float)
+            corrected = cv2.undistort(rgb, K, distortion, None, K)
+            ok, png = cv2.imencode('.png', cv2.cvtColor(corrected, cv2.COLOR_RGB2BGR))
+            if not ok or png.nbytes > MAX_PNG:
+                raise ValueError('去畸变预览编码失败')
+            with self.lock:
+                self._check(owner, epoch)
+            return dict(original=raw, corrected=png.tobytes(), sample_id=sample['id'])
         finally:
             with self.lock:
                 self.busy = False
@@ -327,6 +363,7 @@ class CalibrationWorkspace:
             atomic_json(path, dict(schema='openarm.camera-calibration.candidate.v1',
                 session_id=self.session_id, intrinsics=self.result, head_extrinsics=self.head,
                 camera_name=self.camera_name, board_spec=self.spec,
+                intrinsics_only=self.intrinsics_only,
                 calibration_status='estimated_not_independently_verified', installed=False,
                 evidence_sha256=evidence,
                 samples=[dict(id=s['id'], role=s['role'], png_sha256=s['metadata']['png_sha256']) for s in self.samples]))
@@ -342,6 +379,9 @@ class CalibrationWorkspace:
                 self.state = 'cancelled'
 
     def close(self):
+        wrist = getattr(self, 'wrist_calibration', None)
+        if wrist is not None:
+            wrist.close()
         with self.lock:
             self.closed = True
             self.epoch += 1

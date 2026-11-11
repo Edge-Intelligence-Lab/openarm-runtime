@@ -6,10 +6,11 @@ import time
 
 
 class CalibrationView:
-    def __init__(self, workspace):
+    def __init__(self, workspace, *, title='镜头内参', camera_options=None, intrinsics_only=False):
         from nicegui import ui
         from .calibration_pose_guide import FIT_POSES, pose_svg
         self.ui, self.workspace = ui, workspace
+        self.intrinsics_only = intrinsics_only
         self.owner = ui.context.client.id
         self.working = False
         self.previewing = False
@@ -44,11 +45,15 @@ class CalibrationView:
           .cal-pose-guide svg {width:100%;height:auto;display:block}
           @media(max-width:800px) {.cal-layout{grid-template-columns:1fr}.cal-workspace{padding:16px;gap:16px}.cal-panel{padding:16px}}
         ''')
-        with ui.column().classes('cal-workspace'):
+        with ui.column().classes('w-full gap-5'):
             with ui.row().classes('cal-header'):
                 with ui.column().classes('gap-1'):
-                    ui.label('头部相机标定').classes('text-xl font-semibold')
-                    ui.label('拍摄棋盘，校正镜头畸变。不会移动机械臂。').classes('cal-caption')
+                    ui.label(title).classes('text-lg font-semibold')
+                    ui.label('焦距与镜头畸变 · 手动拍摄标定板').classes('cal-caption')
+                    if camera_options:
+                        self.camera = ui.select(camera_options, value=next(iter(camera_options)),
+                            label='选择腕部相机', on_change=self.settings_changed).classes('w-64').props('data-testid=calibration-camera')
+                        ui.label('先确认预览对应的镜头；左右分别记录，不自动复制参数。').classes('cal-caption')
                 self.status_label = ui.label('准备开始').classes('text-sm').props('role=status aria-live=polite data-testid=calibration-status')
             with ui.element('div').classes('cal-layout'):
                 with ui.column().classes('cal-panel'):
@@ -57,7 +62,7 @@ class CalibrationView:
                         self.preview_button = ui.button('查看画面', on_click=self.toggle_preview).props('flat dense no-caps data-testid=calibration-preview-toggle')
                     with ui.element('div').classes('cal-video'):
                         self.placeholder = ui.label('点击「查看画面」连接已有相机').classes('text-grey-4 text-sm')
-                        self.image = ui.element('img').props('alt="头部相机实时画面" data-testid=calibration-image')
+                        self.image = ui.element('img').props('alt="相机实时画面" data-testid=calibration-image')
                         self.image.set_visibility(False)
                         self.image.on('load', self.preview_loaded)
                         self.image.on('error', self.preview_failed)
@@ -103,7 +108,8 @@ class CalibrationView:
                     with ui.expansion('棋盘与相机设置').classes('cal-settings') as self.settings:
                         self.board_type = ui.radio({'checkerboard':'普通棋盘', 'charuco':'ChArUco'}, value='charuco',
                             on_change=self.board_fields).props('inline data-testid=calibration-board-type')
-                        self.camera = ui.input('相机 ID', value='head',on_change=self.settings_changed).classes('cal-field').props('data-testid=calibration-camera')
+                        if not camera_options:
+                            self.camera = ui.input('相机 ID', value='head',on_change=self.settings_changed).classes('cal-field').props('data-testid=calibration-camera')
                         with ui.row().classes('w-full flex-nowrap'):
                             self.nx = ui.number('横向格数',value=6,min=4,max=40,precision=0,on_change=self.settings_changed).classes('w-1/2')
                             self.ny = ui.number('纵向格数',value=4,min=4,max=40,precision=0,on_change=self.settings_changed).classes('w-1/2')
@@ -129,13 +135,26 @@ class CalibrationView:
                 ui.label('标定结果').classes('text-lg font-semibold')
                 self.result_summary = ui.label('').classes('whitespace-pre-wrap').props('data-testid=calibration-result-summary')
                 self.quality_label = ui.label('').classes('text-sm whitespace-pre-wrap')
+                self.parameters = ui.label('').classes('text-sm whitespace-pre-wrap').props('data-testid=calibration-intrinsic-parameters')
                 ui.label('像素误差越小，图像拟合越好；它不等于真实空间精度已验证。').classes('cal-caption')
                 with ui.expansion('逐图误差与完整数据').classes('w-full'):
                     self.result = ui.code('',language='json').classes('w-full').props('data-testid=calibration-result')
-                self.confirm = ui.checkbox('我已检查结果，保存为候选（不会自动启用）',on_change=self.confirm_changed)
+                self.confirm = None if intrinsics_only else ui.checkbox('我已检查结果，保存为候选（不会自动启用）',on_change=self.confirm_changed)
                 self.save_button = ui.button('保存标定候选',on_click=self.save).props('no-caps data-testid=calibration-save')
                 self.feedback('save')
-            with ui.expansion('高级：离线外参导入与记录').classes('w-full'):
+                if intrinsics_only:
+                    ui.label('保存仅对应所选相机和当前分辨率，不会自动启用或改写另一台。').classes('cal-caption')
+                    self.result_preview_button = ui.button('查看去畸变对照', on_click=self.preview_result).props('outline no-caps data-testid=calibration-result-preview')
+                    self.feedback('result_preview')
+                    with ui.row().classes('w-full flex-nowrap') as self.result_images:
+                        with ui.column().classes('w-1/2'):
+                            ui.label('最后一张已收录原图').classes('cal-caption')
+                            self.original_result_image = ui.image().classes('w-full')
+                        with ui.column().classes('w-1/2'):
+                            ui.label('同内参去畸变 · 不裁剪').classes('cal-caption')
+                            self.corrected_result_image = ui.image().classes('w-full')
+                    self.result_images.set_visibility(False)
+            with ui.expansion('高级：离线外参导入与记录').classes('w-full') as self.import_panel:
                 self.board_warning = ui.label('当前普通棋盘只做内参。外参还缺少固定板方向与可靠的图像—关节反馈同步。').classes('text-sm')
                 ui.label('外参导入仅用于已有的 head 观测，不证明同步，也不与本次内参自动绑定。').classes('cal-caption')
                 self.import_upload = ui.upload(label='导入外参 JSON',auto_upload=True,max_file_size=2_000_000,
@@ -144,7 +163,6 @@ class CalibrationView:
                 self.session_details = ui.label('').classes('cal-caption whitespace-pre-wrap')
                 self.diagnostic = ui.label('').classes('cal-caption whitespace-pre-wrap').props('data-testid=calibration-diagnostic')
                 ui.label('取样使用独立原尺寸 PNG；预览是 JPEG 视频。原图、元数据和结果保存在外部证据目录。取消与关闭页面不是急停。').classes('cal-caption')
-            ui.label('仅标定头部相机内参 · 不控制机器人 · 保存不会自动启用').classes('cal-end')
         self.capture_panel.set_visibility(False)
         self.progress_panel.set_visibility(False)
         self.result_panel.set_visibility(False)
@@ -152,6 +170,7 @@ class CalibrationView:
         self.cancel_button.set_visibility(False)
         self.solve_button.disable()
         self.save_button.disable()
+        self.import_panel.set_visibility(not intrinsics_only)
         self.board_fields()
         self.camera.on_value_change(self.refresh_preview)
         ui.timer(1,self.refresh)
@@ -177,7 +196,7 @@ class CalibrationView:
         for field in (self.marker,self.dictionary,self.dictionary_label):
             field.set_visibility(charuco)
         self.board_warning.set_visibility(not charuco)
-        self.import_upload.set_enabled(charuco and bool(self.last_status and self.last_status['mine']
+        self.import_upload.set_enabled(not self.intrinsics_only and charuco and bool(self.last_status and self.last_status['mine']
             and self.last_status['state'] in ('collecting','estimated')) and not self.working)
         self.settings_changed()
 
@@ -298,7 +317,7 @@ class CalibrationView:
         session = await self.action('start',self.workspace.start,self.camera.value,spec,
             pending='正在准备标定…')
         if session:
-            self.confirm.value = False
+            self.clear_confirmation()
             self.phase = self.role.value = 'fit'
             for name in ('capture','solve','save','cancel','import'):
                 self.message(name,'')
@@ -309,14 +328,14 @@ class CalibrationView:
             self.settings.open()
 
     async def capture(self):
-        self.confirm.value = False
+        self.clear_confirmation()
         sample = await self.action('capture',self.workspace.capture,self.role.value,pending='正在取图并检测棋盘…')
         if sample:
             role = '检查照片' if sample['role'] == 'validation' else '标定照片'
             self.message('capture',f'已收录一张{role} · 检测到 {len(sample["detection"]["corner_ids"])} 个角点。请按上方提示摆下一张。','success')
 
     async def solve(self):
-        self.confirm.value = False
+        self.clear_confirmation()
         result = await self.action('solve',self.workspace.solve,pending='正在计算内参与检查照片误差…',
                                   success='计算完成。请查看下方结果，再决定是否保存。')
         if result:
@@ -350,7 +369,7 @@ class CalibrationView:
             if len(raw)>2_000_000:
                 self.message('import','文件超过 2 MB，请检查文件。','error')
                 return
-        self.confirm.value = False
+        self.clear_confirmation()
         await self.action('import',self.workspace.import_head,bytes(raw),pending='正在检查并拟合外参…',
                           success='已导入离线外参；未验证同步，未与本次内参绑定。')
 
@@ -358,8 +377,23 @@ class CalibrationView:
         await self.refresh()
 
     async def save(self):
-        await self.action('save',self.workspace.save,confirmed=self.confirm.value,pending='正在核验原图并保存…',
-                          success='已保存标定候选和原图记录。尚未安装或启用。')
+        await self.action('save',self.workspace.save,confirmed=self.confirm is None or self.confirm.value is True,pending='正在核验原图并保存…',
+                           success='已保存标定候选和原图记录。尚未安装或启用。')
+
+    def clear_confirmation(self):
+        if self.confirm is not None:
+            self.confirm.value = False
+        if self.intrinsics_only:
+            self.result_images.set_visibility(False)
+
+    async def preview_result(self):
+        import base64
+        images = await self.action('result_preview', self.workspace.preview_intrinsics,
+                                   pending='正在生成最后一张照片的去畸变对照…')
+        if images:
+            self.original_result_image.set_source('data:image/png;base64,'+base64.b64encode(images['original']).decode())
+            self.corrected_result_image.set_source('data:image/png;base64,'+base64.b64encode(images['corrected']).decode())
+            self.result_images.set_visibility(True)
 
     async def refresh(self):
         status = await asyncio.to_thread(self.workspace.status,self.owner)
@@ -425,10 +459,13 @@ class CalibrationView:
         for field in (self.camera,self.board_type,self.nx,self.ny,self.square,self.marker,self.dictionary):
             field.set_enabled(not active and not busy)
         self.settings_hint.set_text('参数已锁定。需修改时，先结束本次标定。' if active else '换棋盘时在这里修改；开始后锁定参数。')
-        self.import_upload.set_enabled(owned and self.board_type.value=='charuco' and not busy)
+        self.import_upload.set_enabled(not self.intrinsics_only and owned and self.board_type.value=='charuco' and not busy)
         self.result_panel.set_visibility(bool(value or head))
-        self.confirm.set_enabled(owned and bool(value or head) and not busy)
-        self.save_button.set_enabled(owned and bool(value or head) and self.confirm.value is True and not busy)
+        if self.confirm is not None:
+            self.confirm.set_enabled(owned and bool(value or head) and not busy)
+        self.save_button.set_enabled(owned and bool(value or head) and (self.confirm is None or self.confirm.value is True) and not busy)
+        if self.intrinsics_only:
+            self.result_preview_button.set_enabled(owned and bool(value) and not busy)
         self.save_button.set_text('已保存' if mine and state=='saved' else '保存标定候选')
         self.session_details.set_text(f'会话：{status["session_id"] or "—"}' if mine else '本窗口没有采集会话。')
         # Do not rebuild the table/code every heartbeat: preserve scroll and focus.
@@ -444,9 +481,55 @@ class CalibrationView:
             self.result.set_content(json.dumps(dict(intrinsics=value,head_extrinsics=head),ensure_ascii=False,indent=2))
             text = f'标定误差 {value["fit_rms_px"]:.3f} px　·　检查误差 {value["validation_rms_px"]:.3f} px' if value else '仅有离线外参估计'
             self.result_summary.set_text(text)
+            if value and 'matrix' in value:
+                k = value['matrix']
+                self.parameters.set_text(f'fx {k[0][0]:.2f}　fy {k[1][1]:.2f}　cx {k[0][2]:.2f}　cy {k[1][2]:.2f} px\n'
+                                         f'图像 {value["image_size"][0]} × {value["image_size"][1]} · {self.camera.value}')
+            else:
+                self.parameters.set_text('')
             issues = value.get('quality_issues',[]) if value else []
             self.quality_label.set_text(('需要复查：\n'+'\n'.join(issues)) if issues else '请检查拍摄覆盖和棋盘尺寸。结果尚未经过独立物理验证。')
 
 
 def build_camera_calibration_view(workspace):
-    return CalibrationView(workspace)
+    from nicegui import ui
+    from .camera_calibration import CalibrationWorkspace
+    teleop = getattr(workspace,'teleop_calibration',False)
+    wrist = getattr(workspace, 'wrist_calibration', None)
+    if wrist is None:
+        wrist = workspace.wrist_calibration = CalibrationWorkspace(
+            workspace.root/'wrist-intrinsics', workspace.video_port, clock=workspace.clock,
+            fetch=workspace.fetch, allowed_cameras=('left','right'), intrinsics_only=True)
+    with ui.column().classes('cal-workspace'):
+        ui.label('相机标定').classes('text-xl font-semibold')
+        with ui.tabs().classes('w-full justify-start').props('align=left no-caps data-testid=calibration-camera-tabs') as camera_modes:
+            ui.tab('head', label='头部相机标定', icon='camera')
+            wrist_tab = ui.tab('wrist', label='腕部相机内参标定', icon='camera_alt')
+        with ui.tab_panels(camera_modes, value='head', animated=False).classes('w-full bg-transparent') as camera_panels:
+            with ui.tab_panel('head').classes('p-0'):
+                with ui.tabs().classes('w-full justify-start').props('align=left no-caps') as modes:
+                    if teleop:
+                        ui.tab('alignment', label='机器人对齐', icon='3d_rotation')
+                    intrinsics_mode = ui.tab('intrinsics', label='镜头内参', icon='camera')
+                with ui.tab_panels(modes, value='alignment' if teleop else 'intrinsics', animated=False).classes('w-full bg-transparent') as panels:
+                    if teleop:
+                        with ui.tab_panel('alignment').classes('p-0'):
+                            from .head_alignment_view import HeadAlignmentView
+                            alignment=HeadAlignmentView(workspace)
+                    with ui.tab_panel('intrinsics').classes('p-0'):
+                        view = CalibrationView(workspace)
+            with ui.tab_panel('wrist').classes('p-0'):
+                wrist_view = CalibrationView(wrist, title='腕部相机内参标定',
+                    camera_options={'left':'左腕相机','right':'右腕相机'}, intrinsics_only=True)
+    view.wrist_view, view.camera_tabs, view.camera_panels = wrist_view, camera_modes, camera_panels
+    view.mode_tabs, view.mode_panels, view.intrinsics_tab = modes, panels, intrinsics_mode
+    if teleop:
+        view.alignment_view=alignment
+        def lock_mode(active):
+            intrinsics_mode.props('disable' if active else '',remove='' if active else 'disable')
+            wrist_tab.props('disable' if active else '',remove='' if active else 'disable')
+            if active:
+                camera_modes.value=camera_panels.value='head'
+                modes.value=panels.value='alignment'
+        alignment.mode_lock=lock_mode
+    return view

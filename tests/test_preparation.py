@@ -28,6 +28,19 @@ def recipe(**changes):
 
 
 class PreparationTests(unittest.TestCase):
+    def test_startup_rejection_records_reason_without_starting_robot(self):
+        robot = SimulatedRobot(('left',))
+        robot.speed = .25
+        recorder = Mock()
+        with self.assertRaisesRegex(ValueError, 'speed exceeds'):
+            PolicySession(robot, Mock(), recorder=recorder, preparation=recipe(velocity_rad_s=.5))
+        self.assertFalse(robot.started)
+        event = recorder.record.call_args.args[0]
+        self.assertEqual(event['event'], 'ended')
+        self.assertEqual(event['stop_reason'], 'preflight_rejected')
+        self.assertFalse(event['hardware_started'])
+        self.assertEqual(event['cleanup_errors'], [])
+
     def bind(self, stage):
         robot = SimulatedRobot(("left",))
         stage.bind(robot, Context(robot.spec, robot.streams, 20))

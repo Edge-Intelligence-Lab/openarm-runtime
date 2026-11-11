@@ -21,6 +21,7 @@ Changelog = "https://github.com/Edge-Intelligence-Lab/openarm-runtime/blob/main/
 
 [project.optional-dependencies]
 gravity = ["pin==4.1.0"]
+simulation = ["mujoco==4.0.0"]
 cartesian = ["pin==4.1.0", "pin-pink==4.4.0", "daqp==0.11.0"]
 platform = ["nicegui==3.18.0", "aiohttp==3.14.5"]
 leader = ["feetech-servo-sdk==1.0.0", "pyserial==3.5"]
@@ -49,4 +50,4 @@ no-build-isolation-package = ["openarm-can"]
 [tool.setuptools.package-data]
 openarm_video = ["static/*.html", "static/*.js", "native/*.cpp"]
 
-openarm_platform = ["static/*.css"]
+openarm_platform = ["static/*.css", "static/*.js"]

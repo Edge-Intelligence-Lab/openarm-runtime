@@ -67,12 +67,16 @@ class ClassicRobot:
     any enable. A shared target deadline stops both workers independently of the
     policy/session thread. close() waits for verified disable via ArmHold.
     """
-    def __init__(self, profile, sides=("left", "right"), watchdog_s=0.5, record=None):
+    def __init__(self, profile, sides=("left", "right"), watchdog_s=0.5, record=None, integral=None):
         if not profile.mapping_verified or not finite(watchdog_s) or not 0 < watchdog_s <= 2:
             raise ValueError("Verified profile and watchdog in (0, 2] seconds required")
         self.profile, self.sides = profile, tuple(sides)
         self.spec, self.streams = joint_spec(sides), state_specs(sides)
         self.watchdog_s = watchdog_s
+        if integral is not None:
+            from openarm_runtime.integral import TrackingIntegral
+            TrackingIntegral(**integral)  # Validate before opening devices.
+        self.integral = integral
         self.record = record or (lambda event: None)
         self.lock = threading.Lock()
         self.events = queue.Queue(maxsize=256)
@@ -132,7 +136,7 @@ class ClassicRobot:
                 check_modes(bus, True, self.stop.is_set)
                 self.prepared.wait()
                 with ArmHold(bus, cancelled, lambda e: self._record(side, e), publish,
-                             tracking=True, gravity=gravity) as control:
+                             tracking=True, gravity=gravity, integral=self.integral) as control:
                     try:
                         control.track(control.base)
                         with self.lock:

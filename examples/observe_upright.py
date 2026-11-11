@@ -73,7 +73,7 @@ def run(args):
     context = Context(joint_spec((args.side,)), specs, 20, "observation-only upright probe")
     encoder = UprightObservation(f"camera/{args.overview}", f"camera/{args.wrist}", side=args.side)
     encoder.reset(context)
-    predictor = NumpyHTTP(args.model_url, timeout_s=5, expected_model_sha256=args.model_sha256)
+    predictor = NumpyHTTP(args.model_url, timeout_s=5, expected_identity={"git_revision": args.model_revision})
     predictor.reset(context)
     buffer = ObservationBuffer(specs, history=1)
     summaries = []
@@ -126,5 +126,5 @@ if __name__ == "__main__":
     parser.add_argument("--wrist", default="left")
     parser.add_argument("--video-url", default="http://127.0.0.1:15003")
     parser.add_argument("--model-url", default="http://127.0.0.1:18765/")
-    parser.add_argument("--model-sha256", required=True)
+    parser.add_argument("--model-revision", required=True)
     run(parser.parse_args())

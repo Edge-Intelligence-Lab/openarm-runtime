@@ -21,8 +21,21 @@ SCIPY = importlib.util.find_spec("scipy") is not None
 
 class ConfigurationTests(unittest.TestCase):
     def test_import_and_construction_without_optional_libraries(self):
+        package_dir = Path(importlib.util.find_spec('openarm_policy').origin).resolve().parent
         code = """
 import sys
+from pathlib import Path
+from importlib.util import find_spec, module_from_spec, spec_from_file_location
+# -I -S hides both source PYTHONPATH and installed site-packages. Load just the
+# package under test, without making its optional neighbours importable.
+package_dir = Path(sys.argv[1])
+spec = spec_from_file_location('openarm_policy', package_dir / '__init__.py',
+                              submodule_search_locations=[str(package_dir)])
+package = module_from_spec(spec)
+sys.modules[spec.name] = package
+spec.loader.exec_module(package)
+assert 'site' not in sys.modules
+assert all(find_spec(name) is None for name in ('numpy', 'scipy', 'torch', 'openarm_can'))
 from openarm_policy.models.temporal import TemporalActionEnsembler, TemporalEnsembleActions
 TemporalActionEnsembler()
 TemporalEnsembleActions({'factory': 'not_imported:Decoder'})
@@ -30,7 +43,7 @@ assert not set(('numpy', 'scipy', 'torch', 'openarm_can')) & set(sys.modules)
 assert 'openarm_policy.contracts' not in sys.modules
 assert 'openarm_policy.models.policy' not in sys.modules
 """
-        subprocess.run([sys.executable, "-S", "-c", code], check=True)
+        subprocess.run([sys.executable, "-I", "-S", "-c", code, str(package_dir)], check=True)
 
     def test_lazy_public_exports_preserve_class_identity(self):
         import openarm_policy
@@ -159,7 +172,7 @@ class WrapperTests(unittest.TestCase):
         import numpy as np
         self.np = np
         self.context = Context(ActionSpec(("a",), (-100.,), (100.,)), (), 20)
-        self.inner = Mock(metadata={"state_width": 10, "action_contract_sha256": "a" * 64})
+        self.inner = Mock(metadata={"state_width": 10, "action_contract": {"schema": "a"}})
         self.inner.decode.side_effect = lambda output, observation: output
         self.wrapper = TemporalEnsembleActions({"factory": "unused:Decoder"})
 
@@ -195,7 +208,7 @@ class WrapperTests(unittest.TestCase):
     def test_metadata_copies_inner_contract_and_state_fields(self):
         self.reset_wrapper()
         meta = self.wrapper.metadata
-        self.assertEqual(meta["action_contract_sha256"], "a" * 64)
+        self.assertEqual(meta["action_contract"], {"schema": "a"})
         self.assertEqual(meta["state_width"], 10)
         self.assertEqual(meta["temporal_ensemble"]["rotation_average"], "linear")
         meta["state_width"] = 8
@@ -218,15 +231,15 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(self.inner.decode.call_count, 1)
 
     def test_modelpolicy_binding_and_reset_failure_cleanup(self):
-        for digest, fail in (("a" * 64, False), ("b" * 64, True)):
-            model = Mock(metadata={"state_width": 10, "action_contract_sha256": digest})
+        for schema, fail in (("a", False), ("b", True)):
+            model = Mock(metadata={"state_width": 10, "action_contract": {"schema": schema}})
             encoder = Mock(metadata={"state_width": 10})
             wrapper = TemporalEnsembleActions({})
             inner = Mock(metadata=self.inner.metadata)
             policy = ModelPolicy({}, {}, {})
             with patch("openarm_policy.models.policy.component", side_effect=[model, encoder, wrapper, inner]):
                 if fail:
-                    with self.assertRaisesRegex(ValueError, "contract SHA256 differ"):
+                    with self.assertRaisesRegex(ValueError, "contracts differ"):
                         policy.reset(self.context)
                 else:
                     policy.reset(self.context)
@@ -300,7 +313,7 @@ class WrapperTests(unittest.TestCase):
                     SensorSample(sequence, 10+sequence*.05, [x, 0, .5, 0, 0, 0, 1, .06]),)})
                 decoded = wrapper.decode(goals, observation)
                 self.np.testing.assert_allclose([row[0] for row in decoded], [x+.002, x+.004])
-            self.assertEqual(len(wrapper.metadata["action_contract_sha256"]), 64)
+            self.assertEqual(wrapper.metadata["action_contract"], contract)
             wrapper.close()
 
 

@@ -5,15 +5,14 @@ predictor plugins. No downloads or optional imports at module import time.
 Adapted TacPilot portions: Copyright (c) 2026 TacPilot contributors, MIT;
 see THIRD_PARTY.md for the retained permission notice.
 """
-import hashlib
 import json
 from pathlib import Path
+import subprocess
 
 
 class TacPilotACT:
-    def __init__(self, checkpoint, device="cpu", expected_model_sha256=None):
+    def __init__(self, checkpoint, device="cpu"):
         self.checkpoint, self.device = Path(checkpoint), device
-        self.expected_hash = expected_model_sha256
         self.policy = None
 
     def reset(self, context):
@@ -25,10 +24,6 @@ class TacPilotACT:
         if not root.is_dir():
             raise ValueError("Checkpoint must be a complete local model directory")
         weights = root / "model.safetensors"
-        with weights.open("rb") as stream:
-            digest = hashlib.file_digest(stream, "sha256").hexdigest()
-        if self.expected_hash is not None and digest != self.expected_hash:
-            raise ValueError("ACT model SHA256 mismatch")
         cfg = ACTConfig.from_pretrained(root, local_files_only=True)
         execution = root/'execution-adapter.json'
         self.execution_adapter = json.loads(execution.read_text()) if execution.exists() else None
@@ -38,7 +33,12 @@ class TacPilotACT:
                         'features': ['waiting', 'joint_tracking_error_fraction'], 'tracking_scale_rad': .15}
             if self.execution_adapter != expected:raise ValueError('Unsupported execution-state adapter')
             self.state_width = 10
-        if (cfg.chunk_size != 100 or cfg.robot_state_feature.shape != (self.state_width,)
+        adapter = root / "observation-adapter.json"
+        self.adapter = json.loads(adapter.read_text()) if adapter.exists() else None
+        # External state remains state8; rotation6d is checkpoint-bound internal
+        # preprocessing, not a change to measured robot-state/action semantics.
+        self.feature_width = self.relative_state([[0.] * self.state_width]).shape[-1]
+        if (cfg.chunk_size != 100 or cfg.robot_state_feature.shape != (self.feature_width,)
                 or cfg.action_feature.shape != (7,) or set(cfg.image_features) != {
                     "observation.images.image", "observation.images.image2"}):
             raise ValueError("Unsupported ACT checkpoint: expected audited state8/action7/H100/two-camera format")
@@ -49,7 +49,7 @@ class TacPilotACT:
         self.stats = {k: v.to(self.device) for k, v in load_file(str(
             root / "policy_preprocessor_step_3_normalizer_processor.safetensors")).items()}
         post = load_file(str(root / "policy_postprocessor_step_0_unnormalizer_processor.safetensors"))
-        for key, width in (("observation.state", self.state_width), ("action", 7),
+        for key, width in (("observation.state", self.feature_width), ("action", 7),
                            ("observation.images.image", None), ("observation.images.image2", None)):
             for field in ("mean", "std"):
                 value = self.stats[key + "." + field]
@@ -59,19 +59,19 @@ class TacPilotACT:
                 raise ValueError("Negative ACT normalization scale")
         for field in ("mean", "std"):
             torch.testing.assert_close(self.stats["action." + field].cpu(), post["action." + field])
-        adapter = root / "observation-adapter.json"
-        self.adapter = json.loads(adapter.read_text()) if adapter.exists() else None
-        if self.adapter is not None:
-            # Validate checkpoint-bound constants before any robot startup.
-            self.relative_state([[0.] * self.state_width])
-        self.metadata = {"family": "tacpilot_act", "model_sha256": digest, "device": self.device,
-                         "state_width": self.state_width, "execution_adapter": self.execution_adapter,
-                         "files_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-                                          for p in root.iterdir() if p.suffix in (".json", ".safetensors")
-                                          and p.name != "model.safetensors"}}
-        if "action-contract.json" in self.metadata["files_sha256"]:
-            # Identity only: action semantics belong to the selected decoder.
-            self.metadata["action_contract_sha256"] = self.metadata["files_sha256"]["action-contract.json"]
+        self.metadata = {"family": "tacpilot_act", "checkpoint": str(root), "device": self.device,
+                         "state_width": self.state_width, "feature_width": self.feature_width,
+                         "execution_adapter": self.execution_adapter}
+        try:
+            revision = subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'],
+                                      capture_output=True, text=True)
+            self.metadata['git_revision'] = revision.stdout.strip() if revision.returncode == 0 else None
+        except OSError:
+            self.metadata['git_revision'] = None
+        for name in ('action', 'image'):
+            path = root / (name + '-contract.json')
+            if path.is_file():
+                self.metadata[name + '_contract'] = json.loads(path.read_text())
 
     def relative_state(self, state):
         import numpy as np
@@ -79,6 +79,15 @@ class TacPilotACT:
         spec = self.adapter
         if spec is None:
             return state
+        rotation6d = {"schema": "tacpilot.rotation6d-state.v1", "input_width": 8,
+                      "feature_width": 11, "rotation_columns": [0, 1], "flatten_order": "column-major"}
+        if spec.get("schema") == rotation6d["schema"]:
+            if spec != rotation6d or state.shape[-1] != 8 or not np.isfinite(state).all():
+                raise ValueError("Unsupported/invalid rotation6d observation adapter")
+            from scipy.spatial.transform import Rotation
+            matrix = Rotation.from_rotvec(state[..., 3:6].astype(float).reshape(-1, 3)).as_matrix()
+            columns = matrix[..., :, :2].swapaxes(-1, -2).reshape(*state.shape[:-1], 6)
+            return np.concatenate([state[..., :3], columns, state[..., 6:8]], axis=-1).astype(np.float32)
         reference = np.asarray(spec.get("reference_xyzw"), dtype=float)
         anchor = np.asarray(spec.get("rotation_anchor"), dtype=float)
         if (spec.get("schema") != "tacpilot.fixed-relative-rotation-state.v1"

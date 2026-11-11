@@ -33,8 +33,13 @@ class CameraConfig:
     uri: str | None = None
 
     calibration_identity: str | None = None
+    capture_backend: str = 'opencv'
 
     def __post_init__(self):
+        if self.capture_backend not in ('opencv', 'v4l2_timestamped'):
+            raise ValueError('Unknown capture_backend')
+        if self.kind != 'rgb' and self.capture_backend != 'opencv':
+            raise ValueError('Timestamped V4L2 backend is RGB only')
         if not isinstance(self.name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", self.name):
             raise ValueError("Camera name must start with a letter and contain only letters, digits, _ or -")
         if self.kind not in ("rgb", "depth"):
@@ -77,6 +82,7 @@ class Frame:
     sequence: int = 0
     pixel_format: str = "bgr8"
     source_id: str = ""
+    acquisition: dict | None = None
 
     def fresh(self, now, max_age=3):
         return 0 <= now - self.received_at < max_age

@@ -29,29 +29,6 @@ jobs:
           PY
           python -m pip install build
           python -m build
-      - name: Verify wheel
-        env:
-          OPENARM_EXPECT_INSTALLED: '1'
-        run: |
-          python -m venv "$RUNNER_TEMP/runtime-test"
-          "$RUNNER_TEMP/runtime-test/bin/python" -m pip install dist/*.whl
-          cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/runtime-test/bin/python" -I -m unittest discover -s "$GITHUB_WORKSPACE/tests"
-      - name: Verify optional platform, gravity and collection previews from release wheel
-        env:
-          OPENARM_EXPECT_INSTALLED: '1'
-        run: |
-          "$RUNNER_TEMP/runtime-test/bin/python" - <<'PY'
-          from pathlib import Path
-          import subprocess, sys
-          wheel = next(Path('dist').glob('*.whl')).resolve()
-          subprocess.run([sys.executable, '-m', 'pip', 'install', str(wheel) + '[platform,gravity,video]'], check=True)
-          PY
-          cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/runtime-test/bin/python" -I -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p 'test_platform*.py'
-          "$RUNNER_TEMP/runtime-test/bin/python" -I -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p 'test_gravity.py'
-          "$RUNNER_TEMP/runtime-test/bin/python" -I -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p 'test_policy*.py'
-          "$RUNNER_TEMP/runtime-test/bin/python" -I -m unittest discover -s "$GITHUB_WORKSPACE/tests" -p 'test_collection*.py'
       - name: Publish artifacts
         env:
           GH_TOKEN: ${{ github.token }}

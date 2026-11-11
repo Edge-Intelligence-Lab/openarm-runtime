@@ -17,10 +17,14 @@ FOLLOWER_KD = (2.75, 2.5, 2.0, 2.0, 0.7, 0.6, 0.5, 0.3)
 
 
 class ArmHold:
-    def __init__(self, bus, cancelled, record, publish, *, tracking=False, manual_side=None, gravity=None, observe=None):
+    def __init__(self, bus, cancelled, record, publish, *, tracking=False, manual_side=None, gravity=None, observe=None, integral=None):
         self.bus, self.cancelled, self.record, self.publish = bus, cancelled, record, publish
         self.tracking = tracking
         self.gravity = gravity
+        if integral is not None and not tracking:
+            raise ValueError('Integral requires explicit tracking ownership')
+        from .integral import TrackingIntegral
+        self.integral = TrackingIntegral(**integral) if integral is not None else None
         self.observe = observe
         self.manual_bounds = joint_bounds_deg(manual_side) if manual_side is not None else None
         self.motion = None
@@ -90,6 +94,10 @@ class ArmHold:
             if self.motion:
                 self.motion.initialize(self.base)
             self.record({"event": "arm_enabled", "base_rad": self.base,
+                         "integral": None if self.integral is None else {
+                             "gain_per_s": self.integral.gain,
+                             "torque_fraction": self.integral.fraction,
+                             "slew_fraction_per_s": self.integral.slew},
                          "kp": FOLLOWER_KP, "kd": FOLLOWER_KD,
                          "sdk_version": self.bus.sdk.__version__,
                          "motion_policy": self.motion.metadata() if self.motion else None})
@@ -117,6 +125,8 @@ class ArmHold:
                          "samples": list(self.trace)})
 
     def disable(self):
+        if self.integral is not None:
+            self.integral.reset()
         errors = []
         # Attempt every disable before checking any reply, even after partial enable.
         for mid in self.attempted:
@@ -213,14 +223,19 @@ class ArmHold:
             self.trace.append(frame)
         try:
             feedforward = None if self.gravity is None else self.gravity.update(self.states)
+            if self.integral is not None:
+                for state in self.states.values():
+                    self.validate(state)
+                feedforward = self.integral.update(self.states, targets, kp, kd, self.bus.ranges,
+                    feedforward or dict.fromkeys(IDS, 0.), time.monotonic())
             if feedforward is not None:
                 for mid in IDS:
                     state = self.states[mid]
                     effort = kp[mid-1] * (targets[mid] - state.position) - kd[mid-1] * state.velocity + feedforward[mid]
                     if abs(effort) > .9 * self.bus.ranges[mid].torque:
-                        raise RuntimeError(f"ID{mid}: combined PD/gravity effort near firmware range")
+                        raise RuntimeError(f"ID{mid}: combined PD/feedforward effort near firmware range")
                 if frame is not None:
-                    frame["gravity"] = self.gravity.last
+                    frame["gravity"] = self.gravity.last if self.gravity else None
             if self.motion:
                 self.motion.supervise(self.states, targets, self.bus.ranges, kp, kd, time.monotonic(), feedforward=feedforward)
             started = time.monotonic()
@@ -237,6 +252,8 @@ class ArmHold:
             if self.motion:
                 self.motion.supervise(states, targets, self.bus.ranges, kp, kd, time.monotonic(), after=True, feedforward=feedforward)
         except BaseException as exc:
+            if self.integral is not None:
+                self.integral.reset()
             if frame is not None:
                 frame["error"] = str(exc)
                 if hasattr(exc, "feedback"):
@@ -250,6 +267,9 @@ class ArmHold:
                           "observation_before": {mid: asdict(s) for mid, s in before.items()},
                           "feedback": {mid: asdict(s) for mid, s in states.items()},
                           "gravity": self.gravity.last if self.gravity else None})
+        if self.integral is not None and self.cycles % 20 == 0:
+            self.record({'event': 'integral_sample', 'torque_nm': dict(self.integral.values),
+                         'torque_fraction': self.integral.fraction})
         self.publish(states)
         self.cycles += 1
         if self.gravity is not None:

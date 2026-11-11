@@ -46,7 +46,7 @@ def joint_rows(snapshot, cursor):
 
 
 class PolicyView:
-    def __init__(self, preview):
+    def __init__(self, preview, models=None):
         from nicegui import ui
         self.ui, self.preview = ui, preview
         self.playing = self.updating = False
@@ -66,12 +66,16 @@ class PolicyView:
             .policy-card { width:100%; box-shadow:none!important; border:1px solid #dfe7df; border-radius:12px; }
             @media(max-width:650px) { .policy-workspace {padding:14px;} .policy-metrics {grid-template-columns:repeat(2,minmax(0,1fr));} }
         ''')
-        with ui.column().classes('policy-workspace'):
+        with ui.column().classes('policy-workspace') as workspace:
             with ui.row().classes('policy-toolbar'):
                 with ui.column().classes('gap-1 grow'):
-                    ui.label('策略可视化').classes('text-2xl font-semibold')
-                    ui.label(f'OpenArm {__version__} · 仿真与记录回放').classes('text-sm text-grey-7')
+                    ui.label('模型与执行').classes('text-2xl font-semibold')
+                    ui.label(f'OpenArm {__version__} · 模型部署、独立仿真与记录回放').classes('text-sm text-grey-7')
                 self.source = ui.badge('等待策略', color='primary').props('data-testid=policy-source')
+            if models is not None:
+                from .model_view import ModelView
+                self.models = ModelView(models)
+            legacy_start = len(workspace.default_slot.children)
             with ui.row().classes('policy-metrics'):
                 self.metrics = {}
                 for key, label in [('state', '会话状态'), ('duration', '采样时间'), ('commands', '已提交指令'), ('latency', '最近推理延迟')]:
@@ -115,6 +119,10 @@ class PolicyView:
             columns = [dict(name=key, label=label, field=key, align='left') for key, label in
                        [('joint', '关节'), ('target', '提交目标（°）'), ('feedback', '反馈采样（°）'), ('error', '目标 − 反馈（°）')]]
             self.table = ui.table(columns=columns, rows=[], row_key='name').classes('policy-card').props('flat dense data-testid=policy-joints')
+            if models is not None:
+                legacy = ui.expansion('独立仿真与历史回放 · 不控制实物', icon='history').classes('w-full')
+                for element in list(workspace.default_slot.children)[legacy_start:-1]:
+                    element.move(legacy)
         self.render()
         ui.timer(.25, self.render)
 
@@ -210,5 +218,5 @@ class PolicyView:
         self.table.update()
 
 
-def build_policy_view(preview):
-    return PolicyView(preview)
+def build_policy_view(preview, models=None):
+    return PolicyView(preview, models)

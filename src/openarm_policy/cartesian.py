@@ -4,7 +4,6 @@ Models submit absolute task-frame TCP goals; IK runs locally at every submit,
 not once per predicted chunk. Underlying CAN workers still own their watchdogs,
 gains, bus leases and disable cleanup. No device is opened by construction.
 """
-import math
 import time
 
 from .contracts import ActionSpec, SensorSample, StreamSpec, TCP_POSE, finite
@@ -51,7 +50,7 @@ class CartesianRobot:
         from openarm_runtime.cartesian import KinematicChain, pose
         allowed = {"side", "calibration_verified", "chain", "task_from_base", "workspace_m",
                    "gripper", "velocity_rad_s", "gripper_velocity_rad_s", "tracking_limit_rad",
-                     "feedback_max_age_s", "calibration_status", "progress"}
+                      "feedback_max_age_s", "calibration_status", "progress", "preparation_velocity_rad_s"}
         verified = config.get("calibration_verified") is True
         nominal = (config.get("calibration_verified") is False
                    and config.get("calibration_status") == "nominal_model_not_hardware_calibrated")
@@ -79,11 +78,12 @@ class CartesianRobot:
         if workspace.shape != (2, 3) or not np.isfinite(workspace).all() or not (workspace[0] < workspace[1]).all():
             raise ValueError("Workspace must be finite [lower_xyz, upper_xyz] in task metres")
         self.speed = config.get("velocity_rad_s", .25)
+        self.preparation_speed = config.get('preparation_velocity_rad_s', self.speed)
         self.grip_speed = config.get("gripper_velocity_rad_s", .5)
         self.tracking = config.get("tracking_limit_rad", .15)
         self.max_age = config.get("feedback_max_age_s", .15)
-        if (any(not finite(v) or v <= 0 for v in (self.speed, self.grip_speed, self.tracking, self.max_age))
-                or self.speed > .5 or self.grip_speed > .5 or self.tracking > .3 or self.max_age > .4):
+        if (any(not finite(v) or v <= 0 for v in (self.speed, self.preparation_speed, self.grip_speed, self.tracking, self.max_age))
+                or self.speed > .5 or self.preparation_speed > .5 or self.grip_speed > .5 or self.tracking > .3 or self.max_age > .4):
             raise ValueError("Invalid Cartesian execution limits")
         names = tuple(f"{self.side}.{n}" for n in ("x", "y", "z", "qx", "qy", "qz", "qw", "opening"))
         self.spec = ActionSpec(names, tuple(workspace[0]) + (-1.,)*4 + (float(min(self.gripper.opening)),),
@@ -144,7 +144,7 @@ class CartesianRobot:
             raise TimeoutError("Preparation submit deadline missed")
         _, measured = self._feedback(self.robot.snapshot())
         joints = np.asarray(values, dtype=float)
-        if (max(abs(joints[:7]-self.reference[:7])) > self.speed*self.period+1e-8
+        if (max(abs(joints[:7]-self.reference[:7])) > self.preparation_speed*self.period+1e-8
                 or abs(joints[7]-self.reference[7]) > self.grip_speed*self.period+1e-8):
             raise ValueError("Preparation joint velocity exceeded")
         if max(abs(joints[:7]-measured[:7])) > self.tracking or abs(joints[7]-measured[7]) > .20:
@@ -195,7 +195,6 @@ class CartesianRobot:
                      self.gripper.aperture(joints[7])]
 
     def start(self):
-        import numpy as np
         from openarm_runtime.cartesian import DifferentialIK
         if self.progress is not None:
             self.progress.waiting_since = None

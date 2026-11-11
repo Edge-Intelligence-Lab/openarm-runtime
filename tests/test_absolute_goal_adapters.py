@@ -84,20 +84,20 @@ class BindingTests(unittest.TestCase):
 
     def test_legacy_and_matching_direct_and_http_metadata(self):
         self.bind({}, {})
-        digest = {"action_contract_sha256": "a"*64}
+        digest = {"action_contract": {"schema": "a"}}
         self.bind(digest, digest)
         self.bind({"model": digest}, digest)
 
     def test_mismatch_missing_and_invalid_metadata_cleanup(self):
-        good = {"action_contract_sha256": "a"*64}
+        good = {"action_contract": {"schema": "a"}}
         for model, decoder in ((good, {}), ({}, good),
-                               (good, {"action_contract_sha256": "b"*64}),
+                               (good, {"action_contract": {"schema": "b"}}),
                                ({"model": good}, {}), ([], {}), ({"model": None}, {}), ({}, [])):
             with self.subTest(model=model, decoder=decoder), self.assertRaises(ValueError):
                 self.bind(model, decoder)
         for bad in (None, True, 1, [], {}, "", "a"*63, "g"*64):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
-                self.bind({"action_contract_sha256": bad}, good)
+                self.bind({"action_contract": bad}, good)
 
     def test_state_width_checks_are_preserved(self):
         for model in ({"state_width": 8}, {}, {"model": {"state_width": 8}}):
@@ -240,11 +240,12 @@ class AbsoluteGoalTests(unittest.TestCase):
             rotation = self.R.from_quat(self.contract["reference_xyzw"])
         return Observation(1, 10, {f"target/{side}": (SensorSample(1, 9.9, [*position, *rotation.as_quat(), .05]),)})
 
-    def test_exact_byte_fingerprint_including_whitespace(self):
-        first = self.decoder().metadata["action_contract_sha256"]
-        self.assertEqual(first, hashlib.sha256(self.path.read_bytes()).hexdigest())
+    def test_contract_ignores_json_whitespace_without_content_hashing(self):
+        first = self.decoder().metadata["action_contract"]
+        self.assertEqual(first, self.contract)
         self.path.write_text(json.dumps(self.contract))
-        self.assertNotEqual(first, self.decoder().metadata["action_contract_sha256"])
+        with patch('hashlib.sha256', side_effect=AssertionError('Content hashing is disabled')):
+            self.assertEqual(first, self.decoder().metadata["action_contract"])
 
     def test_repeated_fixed_goal_converges_without_drift_and_reanchors(self):
         row = self.np.array([.12, -.08, .04, .1, -.05, .08, 0])
@@ -315,7 +316,7 @@ class AbsoluteGoalTests(unittest.TestCase):
         self.np.testing.assert_allclose(self.np.asarray(linear)[:, 7], [.09, .05, .01])
         legacy = UprightActions(.01, .09)
         self.assertEqual((legacy.count, legacy.translation, legacy.rotation), (25, .02, .1))
-        self.assertNotIn("action_contract_sha256", legacy.metadata)
+        self.assertNotIn("action_contract", legacy.metadata)
         self.assertEqual(UprightObservation("a", "b").metadata["state_width"], 8)
         actions = self.np.zeros((25, 7)); actions[:, 0] = 1
         result = legacy.decode(actions, self.observation())
@@ -387,13 +388,12 @@ class AbsoluteGoalTests(unittest.TestCase):
         with patch.dict(sys.modules, modules):
             model = TacPilotACT(root)
             model.reset(None)
-            expected = hashlib.sha256(self.path.read_bytes()).hexdigest()
-            self.assertEqual(model.metadata["action_contract_sha256"], expected)
-            self.assertEqual(model.metadata["files_sha256"]["action-contract.json"], expected)
-            self.assertEqual(model.metadata["model_sha256"], hashlib.sha256(b"fixture").hexdigest())
+            self.assertEqual(model.metadata["action_contract"], json.loads(self.path.read_text()))
+            self.assertNotIn("model_sha256", model.metadata)
+            self.assertNotIn("files_sha256", model.metadata)
             self.path.unlink()
             model.reset(None)
-            self.assertNotIn("action_contract_sha256", model.metadata)
+            self.assertNotIn("action_contract", model.metadata)
 
 
 if __name__ == "__main__":

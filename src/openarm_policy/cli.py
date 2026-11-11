@@ -5,8 +5,8 @@ from pathlib import Path
 import signal
 
 from .adapters import ImportedPolicy
-from .observations import VideoObservation, TactileObservation, HTTPVideoObservation
-from .recording import EpisodeRecorder
+from .observations import VideoObservation, TactileObservation, HTTPVideoObservation, LatestObservationSource
+from .recording import CompactEpisodeRecorder, EpisodeRecorder
 from .robots import ClassicRobot, SimulatedRobot
 from .session import PolicySession, SessionConfig
 
@@ -23,7 +23,7 @@ def phase_status(event):
 def run(args):
     data = json.loads(args.profile.read_text()) if args.profile else {}
     root = args.profile.resolve().parent if args.profile else Path.cwd()
-    unknown = set(data) - {"session", "policy_kwargs", "task", "video_profile", "video_http", "tactile", "cartesian", "preparation", "preparation_profile"}
+    unknown = set(data) - {"session", "policy_kwargs", "task", "video_profile", "video_http", "tactile", "cartesian", "preparation", "preparation_profile", "integral", "rerun_recording"}
     if unknown:
         raise ValueError(f"Unknown policy profile keys: {sorted(unknown)}")
     if data.get("video_http") and data.get("video_profile"):
@@ -41,11 +41,27 @@ def run(args):
         profile = Profile.load(args.config)
         if profile.rate_hz != config.control_hz:
             raise ValueError("Policy control_hz must match Classic profile rate_hz")
-        robot = ClassicRobot(profile, tuple(args.sides), watchdog_s=config.command_timeout_s)
+        robot = ClassicRobot(profile, tuple(args.sides), watchdog_s=config.command_timeout_s,
+                             integral=data.get('integral'))
     else:
         robot = SimulatedRobot(tuple(args.sides))
     with ExitStack() as stack:
-        recorder = stack.enter_context(EpisodeRecorder(args.record)) if args.record else None
+        mode = getattr(args, "record_mode", "summary")
+        if mode not in ("summary", "full"):
+            raise ValueError("Recording mode must be summary or full")
+        if type(data.get('rerun_recording', False)) is not bool:
+            raise ValueError('rerun_recording must be boolean')
+        if data.get('rerun_recording'):
+            if not args.record:
+                raise ValueError('Rerun recording requires an episode directory')
+            from .rerun_recording import RerunEpisodeRecorder
+            recorder_class = RerunEpisodeRecorder
+        else:
+            recorder_class = CompactEpisodeRecorder if mode == "summary" else EpisodeRecorder
+        recorder = stack.enter_context(recorder_class(args.record)) if args.record else None
+        if recorder is not None:
+            recorder.record({"event": "retention_context", "mode": mode,
+                             "profile": data, "policy_factory": args.policy})
         if recorder is not None and isinstance(robot, ClassicRobot):
             robot.record = recorder.record
         if data.get("cartesian"):
@@ -58,7 +74,7 @@ def run(args):
                                    allow_nominal=getattr(args, "allow_nominal_geometry", False))
         sources = []
         if data.get("video_http"):
-            source = HTTPVideoObservation(**data["video_http"])
+            source = stack.enter_context(LatestObservationSource(HTTPVideoObservation(**data["video_http"])))
             sources.append(source)
             if recorder is not None:
                 recorder.record({"event": "video_source", **source.metadata})

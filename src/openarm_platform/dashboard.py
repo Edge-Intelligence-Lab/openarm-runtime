@@ -73,6 +73,8 @@ class Dashboard:
                         ui.label('OpenArm').classes('brand-name')
                         ui.label('PLATFORM').classes('brand-caption')
                 ui.label('工作空间').classes('workspace-label')
+                if self.config.simulation_profile is not None:
+                    tag(ui.label('MUJOCO 仿真 · 实物连接禁用').classes('text-orange-9 font-semibold'), 'simulation-banner')
                 with tag(ui.column().classes('platform-navigation'), 'navigation'):
                     for page in self.pages.values():
                         self.nav[page.id] = tag(ui.button(page.label, icon=ICONS[page.id],
@@ -329,7 +331,8 @@ class Dashboard:
             self.waiting_title.set_text(('正在启动' if state.get('state') == 'starting' else '等待') + page.label)
             self.footer.set_text('控制与遥操共享电机连接 · 切换模式会执行原有停止流程' if page.exclusive_group
                                  else '数采页显示录制状态与历史数据 · 当前设备连接保持不变' if page.id == 'collection'
-                                 else '标定页不运动硬件 · 取消不是急停 · 保存不等于激活' if page.id == 'camera_calibration'
+                                 else ('主臂控制姿态与夹爪 · 标定只采样求解 · 保存不等于启用' if self.config.teleop_calibration_profile
+                                       else '镜头内参不控制机械臂 · 保存不等于启用') if page.id == 'camera_calibration'
                                  else '策略页支持仿真和记录回放 · 当前设备连接保持不变' if page.path else '切换到感知页面会保留当前控制或遥操连接')
         else:
             self.current_label.set_text('概览')
