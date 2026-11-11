@@ -6,6 +6,15 @@ the CLI for live inspection and user-operated control.
 
 Python 3.12 · MIT · Linux SocketCAN for followers · Independent community project
 
+## Head and wrist camera parameters
+
+[One HF reference](configs/cameras/current.json) pins the repository, commit and
+paths for head and wrist parameters, without local parameter copies. See
+[camera conventions and limitations](configs/cameras/README.md). The head baseline
+is installation-specific; the wrist file is not two independently measured full
+calibrations. Fetch parameters externally and select them explicitly; nothing is
+automatically downloaded or activated. Raw calibration evidence stays external.
+
 ## Policy execution and gravity compensation
 
 The platform also provides **数采可视化** at `/#collection`: recording state,
@@ -77,10 +86,10 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 
 # Core: state types, software mapping and control API; no GUI or hardware SDK.
-pip install "openarm-runtime @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.1"
+pip install "openarm-runtime @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
 
 # Serial leader readout, with a browser-based virtual robot.
-pip install "openarm-runtime[leader,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.1"
+pip install "openarm-runtime[leader,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
 ```
 
 Extras compose freely:
@@ -105,7 +114,7 @@ project's environment. With uv, declare and lock the dependency directly:
 
 ```sh
 # Run in your own Python 3.12 project.
-uv add "openarm-runtime[leader,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.1"
+uv add "openarm-runtime[leader,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
 ```
 
 **Modify the runtime while developing your application:** clone the source
@@ -158,7 +167,7 @@ configure the machine once using [platform.example.json](platform.example.json),
 then launch:
 
 ```sh
-python -m pip install "openarm-runtime[platform] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.1"
+python -m pip install "openarm-runtime[platform] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
 openarm-runtime platform --profile ~/.config/openarm-runtime/platform.json
 ```
 
@@ -313,7 +322,7 @@ ssh -N -L 8890:127.0.0.1:8890 -L 8891:127.0.0.1:8891 your-workstation
 Video is available starting with v0.3.0:
 
 ```sh
-python -m pip install "openarm-runtime[video] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.1"
+python -m pip install "openarm-runtime[video] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
 # No cameras or vendor SDK required; clearly labelled SIMULATION.
 openarm-runtime video --simulate --port 5004
 ```
@@ -431,7 +440,7 @@ examples in `examples/`. [Changelog](CHANGELOG.md) · [Provenance](ORIGIN.md) ·
 Paxini IP-M2324-Core (68 points) with the single-channel USB serial converter:
 
 ```sh
-pip install "openarm-runtime[tactile,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.1"
+pip install "openarm-runtime[tactile,viewer] @ git+https://github.com/Edge-Intelligence-Lab/openarm-runtime.git@v0.8.2"
 openarm-runtime tactile --device /dev/serial/by-id/YOUR_CONVERTER --device-id 2 --port 8891
 ```
 

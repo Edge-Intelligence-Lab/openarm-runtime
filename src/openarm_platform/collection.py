@@ -48,7 +48,6 @@ class CollectionBrowser:
         self.root = Path(root).expanduser().resolve()
 
     def live(self, now_ns=None):
-        now_ns = time.time_ns() if now_ns is None else now_ns
         directory = inside(self.root, self.root/'.runtime')
         result = []
         for path in directory.glob('*.json') if directory.is_dir() else ():
@@ -56,7 +55,10 @@ class CollectionBrowser:
                 value = read_json(inside(directory, path))
                 if value.get('schema') != 'openarm.collection-status/1':
                     continue
-                age = (now_ns-finite(value['updated_wall_time_ns'])) / 1e9
+                # The publisher may atomically replace the file during I/O.
+                # Observe now after reading, not before the newer snapshot exists.
+                observed_ns = time.time_ns() if now_ns is None else now_ns
+                age = (observed_ns-finite(value['updated_wall_time_ns'])) / 1e9
                 value['fresh'] = 0 <= age <= 3
                 value['status_age_s'] = max(0, age)
                 result.append(value)
