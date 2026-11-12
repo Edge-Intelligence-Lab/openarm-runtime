@@ -65,7 +65,12 @@ class PolicyView:
             .policy-metric-value { font-size:20px; font-weight:600; margin-top:3px; }
             .policy-card { width:100%; box-shadow:none!important; border:1px solid #dfe7df; border-radius:7px; padding:12px!important; gap:8px!important; }
             .policy-workspace .q-btn { min-height:32px; font-size:12px; }
-            @media(max-width:650px) { .policy-workspace {padding:10px;} .policy-metrics {grid-template-columns:repeat(2,minmax(0,1fr));} }
+            .policy-toolbar .model-action-button { flex:0 0 auto; min-width:5.25rem; min-height:2.25rem; padding:.375rem .875rem!important; white-space:nowrap; }
+            .policy-toolbar .model-load-button { min-width:4.25rem; }
+            .model-action-button .q-btn__content { flex-wrap:nowrap; gap:.375rem; white-space:nowrap; }
+            .model-action-button .q-icon { font-size:1.125rem; }
+            .model-action-button .q-icon.on-left { margin-right:0; }
+            @media(max-width:650px) { .policy-workspace {padding:10px;} .policy-metrics {grid-template-columns:repeat(2,minmax(0,1fr));} .policy-toolbar .model-select {flex-basis:100%; min-width:0!important; max-width:none;} }
         ''')
         with ui.column().classes('policy-workspace') as workspace:
             with ui.row().classes('policy-toolbar'):

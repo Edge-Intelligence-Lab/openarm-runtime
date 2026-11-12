@@ -71,6 +71,9 @@ class HomeViewConstructionTests(unittest.TestCase):
             self.assertFalse(view.home.enabled)
             self.assertFalse(hasattr(view, 'auto_home'))
             self.assertFalse(hasattr(view, 'duration'))
+            for button in (view.load, view.start, view.stop, view.home):
+                self.assertIn('model-action-button', button.classes)
+            self.assertIn('model-load-button', view.load.classes)
             manager.claim_motion.assert_not_called()
             container.delete()
             workspace.close()

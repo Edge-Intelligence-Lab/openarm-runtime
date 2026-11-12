@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Give model text buttons explicit horizontal padding, non-shrinking minimum
+  widths and icon gaps so dense controls do not crowd or overflow their labels.
 - Run web-launched models until operator stop or a safety fault, without a total
   task duration limit. Remove the model duration and automatic-return controls;
   keep independent home requests, disconnect stop and existing safety timeouts.
