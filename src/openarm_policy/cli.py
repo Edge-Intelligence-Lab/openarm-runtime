@@ -22,6 +22,10 @@ def phase_status(event):
 
 
 def run(args):
+    calibrated_zero = getattr(args, 'calibrated_zero', False)
+    if calibrated_zero and (args.profile is not None or tuple(args.sides) != ('left', 'right')
+                            or getattr(args, 'home_only', False)):
+        raise ValueError('Calibrated zero uses both arms and no model/return profile')
     data = json.loads(args.profile.read_text()) if args.profile else {}
     root = args.profile.resolve().parent if args.profile else Path.cwd()
     unknown = set(data) - {"session", "policy_kwargs", "task", "video_profile", "video_http", "tactile", "cartesian", "preparation", "preparation_profile", "integral", "rerun_recording", "return_home"}
@@ -36,7 +40,7 @@ def run(args):
     preparation_options = data.get("preparation")
     if data.get("preparation_profile") is not None:
         preparation_options = json.loads((root / data["preparation_profile"]).read_text())
-    home_only = getattr(args, 'home_only', False)
+    home_only = getattr(args, 'home_only', False) or calibrated_zero
     auto_return = getattr(args, 'auto_return_home', False)
     until_stopped = getattr(args, 'until_stopped', False)
     if until_stopped and auto_return:
@@ -51,13 +55,18 @@ def run(args):
             raise ValueError('Unsupported preparation kind')
         preparation = FixedJointPreparation(**options)
     return_home = None
-    if home_only or auto_return:
+    if calibrated_zero:
+        from .calibrated_home import CalibratedZeroReturn
+        return_home = CalibratedZeroReturn()
+    elif home_only or auto_return:
         from .preparation import reverse_preparation
         return_home = reverse_preparation(preparation, data.get('return_home'))
     config = SessionConfig(**data.get("session", {}))
     if args.robot == "classic":
         from openarm_runtime.config import Profile
         profile = Profile.load(args.config)
+        if calibrated_zero:
+            config = SessionConfig(control_hz=profile.rate_hz)
         if profile.rate_hz != config.control_hz:
             raise ValueError("Policy control_hz must match Classic profile rate_hz")
         robot = ClassicRobot(profile, tuple(args.sides), watchdog_s=config.command_timeout_s,
@@ -80,7 +89,8 @@ def run(args):
         recorder = stack.enter_context(recorder_class(args.record)) if args.record else None
         if recorder is not None:
             recorder.record({"event": "retention_context", "mode": mode,
-                             "profile": data, "policy_factory": args.policy})
+                             "profile": data, "policy_factory": None if home_only else args.policy,
+                             "operation": 'calibrated_bimanual_zero' if calibrated_zero else 'home' if home_only else 'policy'})
         if recorder is not None and isinstance(robot, ClassicRobot):
             robot.record = recorder.record
         if data.get("cartesian"):

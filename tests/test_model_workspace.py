@@ -36,6 +36,70 @@ class Process:
 
 
 class ModelWorkspaceTests(unittest.TestCase):
+    def calibrated_machine(self):
+        self.write('robot.json', dict(format='classic', bitrate=1000000,
+                                     left='can1', right='can0', mapping_verified=True, rate_hz=20))
+        self.item.update(robot='classic', robot_config='robot.json')
+        self.write_catalogue()
+        self.workspace.refresh()
+
+    def test_calibrated_dual_return_uses_machine_not_model_or_policy(self):
+        self.calibrated_machine()
+        (self.root/'model.json').unlink()
+        (self.root/'policy.json').unlink()
+        self.assertTrue(self.workspace.snapshot()['can_return_zero'])
+        child = Process()
+        with patch.object(self.workspace, '_client', side_effect=AssertionError('model')), \
+             patch.object(self.workspace, '_validate_home', side_effect=AssertionError('model route')), \
+             patch('openarm_platform.model_workspace.subprocess.Popen', return_value=child) as launch, \
+             patch('openarm_platform.model_workspace.threading.Thread'):
+            self.workspace.return_zero(confirmed=True, owner='browser-one')
+        command = launch.call_args.args[0]
+        self.assertIn('--calibrated-zero', command)
+        self.assertEqual(command[command.index('--sides')+1:command.index('--sides')+3], ['left', 'right'])
+        for option in ('--profile', '--policy', '--auto-return-home', '--duration'):
+            self.assertNotIn(option, command)
+        self.assertIsNone(self.workspace.server)
+        self.assertEqual(self.workspace.state, 'unloaded')
+        deployment = json.loads((self.workspace.run_root/'deployment.json').read_text())
+        self.assertIsNone(deployment['identity'])
+        self.assertIsNone(deployment['sample_test'])
+        self.assertEqual(deployment['sides'], ['left', 'right'])
+        self.assertEqual(list(deployment['configuration_hashes']), [str(self.root/'robot.json')])
+        self.finish(child)
+
+    def test_dual_return_requires_owner_confirmation_mapping_and_clean_idle(self):
+        self.calibrated_machine()
+        for kwargs in ({}, {'confirmed': True}, {'confirmed': False, 'owner': 'browser-one'}):
+            with self.assertRaises(ValueError): self.workspace.return_zero(**kwargs)
+        self.workspace.execution = 'failed'
+        with self.assertRaises(ValueError):
+            self.workspace.return_zero(confirmed=True, owner='browser-one')
+        self.workspace.execution = 'idle'
+        self.write('robot.json', dict(left='can1', right='can0', mapping_verified=False))
+        self.assertFalse(self.workspace.snapshot()['can_return_zero'])
+        with self.assertRaises(ValueError):
+            self.workspace.return_zero(confirmed=True, owner='browser-one')
+        self.manager.claim_motion.assert_not_called()
+
+    def test_dual_return_never_runs_on_readonly_or_simulation_platform(self):
+        self.calibrated_machine()
+        for readonly, simulation in ((True, False), (False, True)):
+            self.workspace.readonly, self.workspace.simulation = readonly, simulation
+            self.assertFalse(self.workspace.snapshot()['can_return_zero'])
+            with self.assertRaises(ValueError):
+                self.workspace.return_zero(confirmed=True, owner='browser-one')
+        self.manager.claim_motion.assert_not_called()
+
+    def test_robot_profile_change_during_home_handover_prevents_launch(self):
+        self.calibrated_machine()
+        self.manager.claim_motion.side_effect = lambda token: self.write('robot.json', dict(changed=True))
+        with patch('openarm_platform.model_workspace.subprocess.Popen') as launch:
+            with self.assertRaisesRegex(ValueError, '变化'):
+                self.workspace.return_zero(confirmed=True, owner='browser-one')
+        launch.assert_not_called()
+        self.manager.release_motion.assert_called_once()
+
     def home_profile(self):
         self.policy['preparation'] = dict(kind='fixed_joint_waypoints_v1', side='left',
             waypoints=[dict(name='swing', joints_rad=[0, -.1, 0, .03, 0, 0, 0]),

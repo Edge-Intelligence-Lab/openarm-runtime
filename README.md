@@ -59,8 +59,9 @@ openarm-runtime policy --robot simulate --duration 3
 See [policy contracts, adapters, recording and physical execution](docs/policy.md).
 See [official arm limits, soft-boundary holding and hard feedback guards](docs/joint-boundary.md)
 for the shared joint-range change and Cartesian policy's command reserve.
-The model page also supports [one-click natural-hanging return](docs/natural-hanging-return.md)
-through an explicitly configured reverse preparation route, without loading a model for manual return.
+The model page also supports [one-click dual-arm return to calibrated motor zero](docs/natural-hanging-return.md),
+reusing the existing synchronized home controller, holding the grippers and requiring
+no model loading or extra home-angle profile. Both buses preflight before any enable.
 Web-launched models run until operator stop or a safety fault; stopping never starts a return.
 Missing CAN does not block the page: [background query-only reconnection](docs/connection-recovery.md)
 reports readiness without automatically enabling or resuming motion.

@@ -5,7 +5,7 @@ the browser cannot supply paths, factories, commands, ports or environments.
 Loading and sample prediction never construct a robot. Physical execution reuses
 the policy CLI, session watchdogs, bus leases and verified cleanup.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import math
@@ -403,8 +403,26 @@ class ModelWorkspace:
         return self._start(None, confirmed=confirmed, owner=owner, allow_nominal=allow_nominal,
                            home_only=True, name=name)
 
+    def _calibrated_home_entry(self):
+        """Use the installation's existing Classic profile, never a model pose."""
+        if self.simulation:
+            raise ValueError('仿真平台不启动实物双臂下垂')
+        entries = [e for e in self.entries.values() if e.robot == 'classic' and e.robot_config is not None]
+        profiles = {e.robot_config for e in entries}
+        if len(profiles) != 1:
+            raise ValueError('未找到唯一的双臂硬件配置')
+        from openarm_runtime.config import Profile
+        profile = Profile.load(entries[0].robot_config)
+        if not profile.mapping_verified or profile.interface('left') == profile.interface('right'):
+            raise ValueError('双臂 CAN 侧别映射未确认')
+        return replace(entries[0], sides=('left', 'right'))
+
+    def return_zero(self, *, confirmed=False, owner=None):
+        return self._start(None, confirmed=confirmed, owner=owner,
+                           home_only=True, calibrated_zero=True)
+
     def _start(self, duration, *, confirmed=False, owner=None, allow_nominal=False,
-               auto_return_home=False, home_only=False, name=None):
+               auto_return_home=False, home_only=False, name=None, calibrated_zero=False):
         with self.operation:
             with self.lock:
                 self._writable()
@@ -413,8 +431,12 @@ class ModelWorkspace:
                     raise ValueError('上次退出清理未确认，请先现场检查，不能重新使能归位')
                 if not home_only:
                     self._unchanged()
-                entry = self._entry(name) if home_only else self.entry
-                self.connectivity.require_ready(entry)
+                entry = self._calibrated_home_entry() if calibrated_zero else self._entry(name) if home_only else self.entry
+                if not calibrated_zero:
+                    self.connectivity.require_ready(entry)
+                # Calibrated zero preflights BOTH buses in the existing CLI
+                # before either enables. A model's single-arm reader is not
+                # evidence of whole-installation readiness or a motion command.
                 if confirmed is not True or not isinstance(owner, str) or not owner:
                     raise ValueError('必须由当前页面的操作员明确确认启动')
                 if not home_only and duration is not None and (isinstance(duration, bool) or not isinstance(duration, (int, float))
@@ -426,10 +448,11 @@ class ModelWorkspace:
                     raise ValueError('名义几何研究试运行必须显式选择')
                 if not home_only and duration is None and auto_return_home:
                     raise ValueError('手动停止模式不自动归位，请使用独立归位按钮')
-                data = self._execution_options(allow_nominal=allow_nominal, entry=entry, home_only=home_only)
-                if home_only or auto_return_home:
+                data = {} if calibrated_zero else self._execution_options(allow_nominal=allow_nominal, entry=entry, home_only=home_only)
+                if (home_only or auto_return_home) and not calibrated_zero:
                     self._validate_home(entry, data)
-                fingerprint = entry.fingerprint()
+                fingerprint = ({str(entry.robot_config): file_hash(entry.robot_config)} if calibrated_zero
+                               else entry.fingerprint())
                 if not home_only:
                     self._client(entry)
                 token = ('home-' if home_only else 'policy-') + uuid.uuid4().hex
@@ -451,34 +474,40 @@ class ModelWorkspace:
                         return self.snapshot()
                     if not home_only:
                         self._unchanged()
-                    if entry.fingerprint() != fingerprint:
+                    current_fingerprint = ({str(entry.robot_config): file_hash(entry.robot_config)} if calibrated_zero
+                                           else entry.fingerprint())
+                    if current_fingerprint != fingerprint:
                         raise ValueError('归位/执行配置在交接时发生变化，请重新检查')
                     root = self.record_root / token
                     root.mkdir(parents=True, exist_ok=False)
                     args = [entry.runtime_python, '-m', 'openarm_runtime']
                     if entry.robot_config is not None:
                         args += ['--config', str(entry.robot_config)]
-                    args += ['policy', '--robot', entry.robot, '--sides', *entry.sides,
-                        '--policy', 'openarm_policy.models.policy:ModelPolicy',
-                        '--profile', str(entry.policy_profile)]
-                    if home_only:
-                        args += ['--home-only']
-                    elif duration is not None:
-                        args += ['--duration', str(duration)]
+                    args += ['policy', '--robot', entry.robot, '--sides', *entry.sides]
+                    if calibrated_zero:
+                        args += ['--calibrated-zero']
                     else:
+                        args += ['--policy', 'openarm_policy.models.policy:ModelPolicy',
+                                 '--profile', str(entry.policy_profile)]
+                    if home_only and not calibrated_zero:
+                        args += ['--home-only']
+                    elif not home_only and duration is not None:
+                        args += ['--duration', str(duration)]
+                    elif not home_only:
                         args += ['--until-stopped']
                     if auto_return_home:
                         args += ['--auto-return-home']
                     args += ['--record', str(root / 'episode'), '--record-mode', 'summary']
                     if allow_nominal:
                         args += ['--allow-nominal-geometry']
-                    (root / 'deployment.json').write_text(json.dumps(dict(id=entry.id,
-                        identity=entry.identity, configuration_hashes=fingerprint,
-                        duration_s=duration, sample_test=self.test_result,
+                    (root / 'deployment.json').write_text(json.dumps(dict(id='calibrated-bimanual-zero' if calibrated_zero else entry.id,
+                        identity=None if calibrated_zero else entry.identity, configuration_hashes=fingerprint,
+                        duration_s=duration, sample_test=None if calibrated_zero else self.test_result,
                         allow_nominal_geometry=allow_nominal, operation='home' if home_only else 'policy',
+                        calibrated_zero=calibrated_zero, sides=list(entry.sides),
                         auto_return_home=auto_return_home), indent=2) + '\n')
                     with (root / 'console.log').open('ab', buffering=0) as log:
-                        process = subprocess.Popen(args, cwd=entry.policy_profile.parent,
+                        process = subprocess.Popen(args, cwd=entry.robot_config.parent if calibrated_zero else entry.policy_profile.parent,
                             env=child_environment(entry.runtime_env), stdin=subprocess.DEVNULL,
                             stdout=log, stderr=subprocess.STDOUT, start_new_session=os.name == 'posix')
                     self.process, self.run_root = process, root
@@ -600,6 +629,12 @@ class ModelWorkspace:
                 self.state, self.test_result = 'error', None
                 self.error = self.error or '模型进程已退出，请重新加载'
             blockers = []
+            home_available, home_error = False, ''
+            try:
+                self._calibrated_home_entry()
+                home_available = True
+            except (ValueError, OSError, TypeError, KeyError) as exc:
+                home_error = str(exc)
             requires_nominal = False
             if self.entry is not None:
                 if self.entry.probe_inputs is None:
@@ -619,6 +654,9 @@ class ModelWorkspace:
                 connection=self.connectivity.snapshot(),
                 can_return_home=not self.readonly and not self.closed and self.process is None
                     and self.state not in ('loading', 'checking') and self.execution not in ('starting', 'stopping', 'failed'),
+                can_return_zero=home_available and not self.readonly and not self.closed and self.process is None
+                    and self.state not in ('loading', 'checking') and self.execution not in ('starting', 'stopping', 'failed'),
+                home_error=home_error,
                 requires_nominal_opt_in=requires_nominal,
                 can_start=not self.readonly and not self.closed and self.state == 'tested'
                     and self._connection_allows(self.entry)

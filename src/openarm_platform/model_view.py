@@ -48,10 +48,10 @@ class ModelView:
                 self.tip(self.start, '完成准备后持续执行，直到手动停止或安全保护触发。请确认现场空间及机械臂状态；加载模型本身不会运动。')
                 self.stop = ui.button('停止', icon='stop', on_click=lambda: self.act('stop')).props('outline dense data-testid=model-stop').classes('model-action-button')
                 self.tip(self.stop, '请求停止当前会话并完成失能清理。停止或故障不会触发自动返程。')
-                self.home = ui.button('归位', icon='keyboard_arrow_down', on_click=self.confirm_home).props('outline dense data-testid=model-home').classes('model-action-button')
-                self.tip(self.home, '按已配置路径主动返回自然下垂姿态，夹爪保持；不是避障规划，可随时停止。')
+                self.home = ui.button('双臂下垂', icon='keyboard_arrow_down', on_click=self.confirm_home).props('outline dense data-testid=model-home').classes('model-action-button')
+                self.tip(self.home, '两臂同步回到既有标定电机零位，运动中保持夹爪目标；无需加载或选择模型。两条总线均通过检查后才会使能，限速5°/秒；不是避障规划，可随时停止。完成后正常失能，不保证持续夹持物体。')
             self.home_note = ui.label('').classes('text-xs text-orange-9')
-            self.tip(self.home_note, '当前执行配置缺少自然下垂姿态或反向准备路径；需在个人 profile 中配置。')
+            self.home_note_hint = self.tip(self.home_note, '')
             self.error = ui.label('').classes('text-red-8').props('role=alert tabindex=0 data-testid=model-error')
             self.error_hint = self.tip(self.error, '')
             self.input_note = ui.label('尚无模型输入').classes('text-xs text-grey-7')
@@ -95,7 +95,7 @@ class ModelView:
             self.action_error = ''
         except Exception as exc:
             connection = self.workspace.connectivity.snapshot()
-            waiting = name in ('start', 'return_home') and connection.get('enabled') and connection.get('state') == 'waiting'
+            waiting = name in ('start', 'return_home', 'return_zero') and connection.get('enabled') and connection.get('state') == 'waiting'
             self.ui.notify('等待 CAN 连接' if waiting else '操作失败，悬停异常状态查看详情', type='info' if waiting else 'negative')
             if waiting:
                 self.connection.set_text('CAN 连接中')
@@ -123,12 +123,10 @@ class ModelView:
 
     async def confirm_home(self):
         state = self.workspace.snapshot()
-        entry = next((m for m in state['models'] if m['id'] == self.select.value), None)
-        if not state.get('can_return_home') or not entry or not entry.get('home_configured'):
+        if not state.get('can_return_zero'):
             self.ui.notify('归位暂不可用', type='warning')
             return
-        await self.act('return_home', self.select.value, confirmed=True, owner=self.owner,
-                       allow_nominal=entry.get('home_requires_nominal', False))
+        await self.act('return_zero', confirmed=True, owner=self.owner)
 
     def render(self):
         try:
@@ -228,10 +226,8 @@ class ModelView:
                               (unloaded or self.select.value != state['selected']))
         self.unload.set_enabled(writable and idle and not unloaded)
         self.start.set_enabled(writable and state['can_start'] and self.select.value == state['selected'])
-        home_configured = bool(entry and entry.get('home_configured'))
-        connection_allows = (not entry or entry.get('robot') != 'classic' or not connection.get('enabled')
-                             or connection.get('state') in ('ready', 'busy'))
-        self.home.set_enabled(writable and home_configured and state.get('can_return_home', False) and connection_allows)
-        self.home_note.set_text('归位未配置')
-        self.home_note.set_visibility(bool(entry) and not home_configured)
+        self.home.set_enabled(writable and state.get('can_return_zero', False))
+        self.home_note.set_text('双臂下垂不可用')
+        self.home_note_hint.set_text(state.get('home_error', ''))
+        self.home_note.set_visibility(bool(state.get('home_error')))
         self.stop.set_enabled(not state['readonly'] and (state['running'] or state['state'] in ('loading', 'checking')))

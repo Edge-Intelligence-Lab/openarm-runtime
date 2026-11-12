@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Make the web home button an independent dual-arm return to existing calibrated
+  motor zero, reusing the synchronized home controller and holding both grippers.
+  No selected/loaded model or extra home-angle profile is required. Preserve dual
+  preflight-before-enable, ownership, feedback, watchdogs and verified cleanup.
 - Give model text buttons explicit horizontal padding, non-shrinking minimum
   widths and icon gaps so dense controls do not crowd or overflow their labels.
 - Run web-launched models until operator stop or a safety fault, without a total

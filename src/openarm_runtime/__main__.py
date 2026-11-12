@@ -67,7 +67,9 @@ def main():
     policy.add_argument("--allow-nominal-geometry", action="store_true",
                          help="Explicit operator trial with declared uncalibrated model geometry; not a calibration assertion")
     policy.add_argument('--home-only', action='store_true',
-                        help='Operator-started natural-hanging return; no model or cameras')
+                         help='Operator-started natural-hanging return; no model or cameras')
+    policy.add_argument('--calibrated-zero', action='store_true',
+                         help='Return both arms to their existing calibrated motor zero; hold grippers, no model')
     policy.add_argument('--auto-return-home', action='store_true',
                         help='Use declared return route only after normal duration completion, never on stop/fault')
     model_serve = commands.add_parser("model-serve", help="Serve an optional model on loopback; never opens robot devices")

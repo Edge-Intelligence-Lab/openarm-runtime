@@ -19,18 +19,15 @@ class HomeViewTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_home_can_be_requested_without_loading_or_testing_model(self):
         view = self.view()
-        view.workspace.snapshot.return_value = dict(can_return_home=True, selected=None,
-            models=[dict(id='registered', home_configured=True, home_requires_nominal=True)])
+        view.select.value = None
+        view.workspace.snapshot.return_value = dict(can_return_zero=True, selected=None, models=[])
         await view.confirm_home()
-        view.act.assert_awaited_once_with('return_home', 'registered', confirmed=True,
-                                          owner='browser-one', allow_nominal=True)
+        view.act.assert_awaited_once_with('return_zero', confirmed=True, owner='browser-one')
 
     async def test_unconfigured_or_blocked_home_does_not_dispatch(self):
         view = self.view()
-        for can, configured in ((False, True), (True, False)):
-            view.workspace.snapshot.return_value = dict(can_return_home=can,
-                models=[dict(id='registered', home_configured=configured)])
-            await view.confirm_home()
+        view.workspace.snapshot.return_value = dict(can_return_zero=False)
+        await view.confirm_home()
         view.act.assert_not_awaited()
 
     async def test_start_uses_manual_stop_without_duration_or_auto_return(self):
@@ -64,7 +61,7 @@ class HomeViewConstructionTests(unittest.TestCase):
             workspace = ModelWorkspace(None, root, manager, readonly=True)
             with ui.column() as container:
                 view = ModelView(workspace)
-            self.assertEqual(view.home.text, '归位')
+            self.assertEqual(view.home.text, '双臂下垂')
             self.assertFalse(hasattr(view, 'test'))
             self.assertEqual(view.load.text, '加载')
             self.assertIn('自动', view.status_hint.text)
