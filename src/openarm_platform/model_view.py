@@ -49,7 +49,7 @@ class ModelView:
                 self.stop = ui.button('停止', icon='stop', on_click=lambda: self.act('stop')).props('outline dense data-testid=model-stop').classes('model-action-button')
                 self.tip(self.stop, '请求停止当前会话并完成失能清理。停止或故障不会触发自动返程。')
                 self.home = ui.button('双臂下垂', icon='keyboard_arrow_down', on_click=self.confirm_home).props('outline dense data-testid=model-home').classes('model-action-button')
-                self.tip(self.home, '两臂同步回到既有标定电机零位，运动中保持夹爪目标；无需加载或选择模型。两条总线均通过检查后才会使能，限速5°/秒；不是避障规划，可随时停止。完成后正常失能，不保证持续夹持物体。')
+                self.tip(self.home, '两臂同步回到既有标定电机零位，运动中保持夹爪目标；无需加载或选择模型。两条总线均通过检查后才会使能，限速10°/秒；不是避障规划，可随时停止。完成后正常失能，不保证持续夹持物体。')
             self.home_note = ui.label('').classes('text-xs text-orange-9')
             self.home_note_hint = self.tip(self.home_note, '')
             self.error = ui.label('').classes('text-red-8').props('role=alert tabindex=0 data-testid=model-error')

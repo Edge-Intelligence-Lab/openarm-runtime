@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Double the independent dual-arm down button's peak speed to 10 degrees/s at
+  operator request; retain the 5 degrees/s teleoperation default and unchanged
+  arrival, tracking, feedback and stop protections.
 - Make the web home button an independent dual-arm return to existing calibrated
   motor zero, reusing the synchronized home controller and holding both grippers.
   No selected/loaded model or extra home-angle profile is required. Preserve dual

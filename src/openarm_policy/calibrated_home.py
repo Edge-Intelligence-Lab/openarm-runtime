@@ -18,6 +18,9 @@ class CalibratedZeroReturn:
         self.commands = {}
         self.sides = ('left', 'right')
         self.home = HomeCoordinator(self.sides)
+        # Operator-approved web return speed; do not change teleoperation's
+        # existing HomeCoordinator default or its arrival/stop protections.
+        self.home.speed_deg_s = 10.
         self.metadata = dict(kind='calibrated_bimanual_zero_v1', learned=False,
             destination='existing_calibrated_motor_zero', gripper='hold_entry',
             sides=list(self.sides), peak_speed_deg_s=self.home.speed_deg_s,

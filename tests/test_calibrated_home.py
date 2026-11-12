@@ -31,7 +31,7 @@ class CalibratedHomeTests(unittest.TestCase):
         stage.bind(robot, Context(robot.spec, robot.streams, 20))
         return robot, stage
 
-    def test_dual_arm_zero_holds_grippers_and_reuses_existing_speed(self):
+    def test_dual_arm_zero_holds_grippers_and_bounds_ten_degree_peak_speed(self):
         robot, stage = self.bound()
         robot.values = self.initial
         events = []; recorder = Mock(); recorder.record.side_effect = events.append
@@ -47,11 +47,28 @@ class CalibratedHomeTests(unittest.TestCase):
         for _, commands in robot.commands:
             self.assertEqual((commands[7], commands[15]), (.4, -.4))
             for i in (*range(7), *range(8, 15)):
-                self.assertLessEqual(abs(commands[i]-previous[i]), math.radians(5)/20+1e-9)
+                self.assertLessEqual(abs(commands[i]-previous[i]), math.radians(10)/20+1e-9)
             previous = commands
         self.assertIn('return_home_completed', [e['event'] for e in events])
         self.assertEqual(events[-1]['stop_reason'], 'home_completed')
         self.assertEqual(events[-1]['cleanup_errors'], [])
+
+    def test_speed_is_doubled_without_changing_legacy_home_or_arrival_settings(self):
+        from openarm_runtime.homing import HomeCoordinator
+        _, stage = self.bound()
+        legacy = HomeCoordinator(('left', 'right'))
+        self.assertEqual(stage.home.speed_deg_s, 10.)
+        self.assertEqual(stage.metadata['peak_speed_deg_s'], 10.)
+        self.assertEqual(legacy.speed_deg_s, 5.)
+        stage.begin(observation(self.initial))
+        legacy.request()
+        for index, side in enumerate(('left', 'right')):
+            q = dict(enumerate(self.initial[index*8:index*8+8], 1))
+            states = {mid: SimpleNamespace(position=v, velocity=0.) for mid, v in q.items()}
+            legacy.step(side, q, states, 100.)
+        self.assertAlmostEqual(stage.home.duration, legacy.duration/2)
+        for name in ('tolerance_deg', 'settle_s', 'settle_timeout_s'):
+            self.assertEqual(getattr(stage.home, name), getattr(legacy, name))
 
     def test_missing_stale_and_nonfinite_feedback_are_rejected(self):
         for bad in (replace(observation(self.initial), streams={}),
