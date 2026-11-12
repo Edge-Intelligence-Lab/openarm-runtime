@@ -36,6 +36,117 @@ class Process:
 
 
 class ModelWorkspaceTests(unittest.TestCase):
+    def home_profile(self):
+        self.policy['preparation'] = dict(kind='fixed_joint_waypoints_v1', side='left',
+            waypoints=[dict(name='swing', joints_rad=[0, -.1, 0, .03, 0, 0, 0]),
+                       dict(name='ready', joints_rad=[.1, -.1, 0, .1, 0, 0, 0])])
+        self.policy['return_home'] = dict(kind='reverse_preparation_v1',
+            home_joints_rad=[0, 0, 0, .03, 0, 0, 0])
+        self.write('policy.json', self.policy)
+
+    def test_home_only_from_unloaded_page_uses_motion_lease_but_never_model(self):
+        self.home_profile()
+        child = Process()
+        with patch.object(self.workspace, '_client', side_effect=AssertionError('model')), \
+             patch('openarm_platform.model_workspace.subprocess.Popen', return_value=child) as launch, \
+             patch('openarm_platform.model_workspace.threading.Thread'):
+            self.workspace.return_home('sample-model', confirmed=True, owner='browser-one')
+        command = launch.call_args.args[0]
+        self.assertIn('--home-only', command)
+        self.assertNotIn('--auto-return-home', command)
+        self.assertEqual(self.workspace.operation_kind, 'home')
+        self.assertEqual(self.workspace.state, 'unloaded')
+        self.manager.claim_motion.assert_called_once()
+        self.finish(child)
+        self.assertEqual(self.workspace.execution, 'completed')
+
+    def test_home_requires_configuration_confirmation_and_cleanup(self):
+        with self.assertRaises(ValueError):
+            self.workspace.return_home('sample-model', confirmed=True, owner='browser-one')
+        self.home_profile()
+        with self.assertRaises(ValueError):
+            self.workspace.return_home('sample-model', owner='browser-one')
+        self.workspace.execution = 'failed'
+        with self.assertRaisesRegex(ValueError, '清理'):
+            self.workspace.return_home('sample-model', confirmed=True, owner='browser-one')
+        self.manager.claim_motion.assert_not_called()
+        self.workspace.execution = 'idle'
+
+    def test_auto_return_is_explicit_and_missing_route_rejects_before_claim(self):
+        self.tested()
+        with patch.object(self.workspace, '_client', return_value=self.client):
+            with self.assertRaises(ValueError):
+                self.workspace.start(1, confirmed=True, owner='browser-one', auto_return_home=True)
+        self.manager.claim_motion.assert_not_called()
+        self.workspace.unload()
+        self.home_profile()
+        self.server = Process()
+        self.tested()
+        child = Process()
+        with patch.object(self.workspace, '_client', return_value=self.client), \
+             patch('openarm_platform.model_workspace.subprocess.Popen', return_value=child) as launch, \
+             patch('openarm_platform.model_workspace.threading.Thread'):
+            self.workspace.start(1, confirmed=True, owner='browser-one', auto_return_home=True)
+        self.assertIn('--auto-return-home', launch.call_args.args[0])
+        self.finish(child)
+
+    def test_default_start_has_no_duration_and_stop_preserves_cleanup_lease(self):
+        self.tested()
+        child = Process()
+        with patch.object(self.workspace, '_client', return_value=self.client), \
+             patch('openarm_platform.model_workspace.subprocess.Popen', return_value=child) as launch, \
+             patch('openarm_platform.model_workspace.threading.Thread'):
+            self.workspace.start(confirmed=True, owner='browser-one')
+        command = launch.call_args.args[0]
+        self.assertIn('--until-stopped', command)
+        self.assertNotIn('--duration', command)
+        self.assertNotIn('--auto-return-home', command)
+        deployment = json.loads((self.workspace.run_root/'deployment.json').read_text())
+        self.assertIsNone(deployment['duration_s'])
+        self.assertFalse(deployment['auto_return_home'])
+        self.workspace.stop(owner='another-browser')
+        self.assertFalse(child.terminated)
+        self.workspace.stop(owner='browser-one')
+        self.assertTrue(child.terminated)
+        self.assertFalse(child.killed)
+        self.manager.release_motion.assert_not_called()
+        self.finish(child)
+        self.manager.release_motion.assert_called_once()
+
+    def test_manual_stop_rejects_automatic_return_before_motion_claim(self):
+        self.tested()
+        with self.assertRaisesRegex(ValueError, '手动停止'):
+            self.workspace.start(confirmed=True, owner='browser-one', auto_return_home=True)
+        self.manager.claim_motion.assert_not_called()
+
+    def test_home_watcher_does_not_require_predictor_server(self):
+        self.home_profile()
+        child = Process()
+        with patch('openarm_platform.model_workspace.subprocess.Popen', return_value=child), \
+             patch('openarm_platform.model_workspace.threading.Thread'):
+            self.workspace.return_home('sample-model', confirmed=True, owner='browser-one')
+        self.assertIsNone(self.workspace.server)
+        child.code = 0
+        with patch.object(self.workspace, '_finished') as finished:
+            self.workspace._watch()
+        self.assertFalse(child.terminated)
+        finished.assert_called_once()
+        self.finish(child)
+
+    def test_return_home_readonly_and_simulation_platform_guards_precede_motion(self):
+        self.home_profile()
+        self.workspace.readonly = True
+        with self.assertRaises(ValueError):
+            self.workspace.return_home('sample-model', confirmed=True, owner='browser-one')
+        self.workspace.readonly = False
+        self.workspace.simulation = True
+        from dataclasses import replace
+        self.workspace.entries['sample-model'] = replace(self.workspace.entries['sample-model'],
+            robot='classic', robot_config=self.root/'model.json')
+        with self.assertRaisesRegex(ValueError, '仿真平台'):
+            self.workspace.return_home('sample-model', confirmed=True, owner='browser-one')
+        self.manager.claim_motion.assert_not_called()
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -80,10 +191,72 @@ class ModelWorkspaceTests(unittest.TestCase):
         self.item['probe_inputs'] = 'probe.npz'
         self.write_catalogue()
         self.workspace.refresh()
-        self.load()
         self.client.predict.return_value = np.zeros((2, 8))
-        with patch.object(self.workspace, '_client', return_value=self.client):
-            self.workspace.test()
+        self.load()
+
+    def test_load_automatically_checks_sample_once_and_is_ready(self):
+        self.tested()
+        self.client.predict.assert_called_once()
+        self.assertEqual(self.workspace.state, 'tested')
+        self.assertTrue(self.workspace.snapshot()['can_start'])
+        self.manager.claim_motion.assert_not_called()
+
+    def test_automatic_check_rejects_wrong_shape_and_nonfinite_output(self):
+        import numpy as np
+        np.savez(self.root / 'probe.npz', state=np.zeros((1, 8)))
+        self.item['probe_inputs'] = 'probe.npz'
+        self.write_catalogue()
+        self.workspace.refresh()
+        for output in (np.zeros((1, 8)), np.full((2, 8), np.nan), np.full((2, 8), np.inf)):
+            with self.subTest(output=output.shape):
+                self.server = Process()
+                self.client.predict.return_value = output
+                with self.assertRaisesRegex(ValueError, '协议'):
+                    self.load()
+                self.assertEqual(self.workspace.state, 'error')
+                self.assertIsNone(self.workspace.server)
+                self.assertTrue(self.server.terminated)
+                self.assertFalse(self.workspace.snapshot()['can_start'])
+        self.manager.claim_motion.assert_not_called()
+
+    def test_stop_during_automatic_check_cannot_publish_readiness(self):
+        import numpy as np
+        def cancel_prediction(inputs):
+            self.assertEqual(self.workspace.state, 'checking')
+            self.assertFalse(self.workspace.snapshot()['can_return_home'])
+            self.workspace.stop()
+            return np.zeros((2, 8))
+        self.client.predict.side_effect = cancel_prediction
+        with self.assertRaisesRegex(RuntimeError, '取消'):
+            self.tested()
+        self.assertIsNone(self.workspace.test_result)
+        self.assertIsNone(self.workspace.server)
+        self.assertFalse(self.workspace.snapshot()['can_start'])
+        self.manager.claim_motion.assert_not_called()
+
+    def test_model_replacement_rejects_active_motion_before_closing_predictor(self):
+        child, _ = self.start()
+        from dataclasses import replace
+        self.workspace.entries['other'] = replace(self.workspace.entry, id='other')
+        with self.assertRaisesRegex(ValueError, '停止执行'):
+            self.workspace.load('other')
+        self.assertFalse(self.server.terminated)
+        self.finish(child)
+
+    def test_idle_model_replacement_closes_only_old_owned_predictor(self):
+        self.write_catalogue([self.item, {**self.item, 'id': 'other'}])
+        self.workspace.refresh()
+        self.load()
+        old = self.server
+        replacement = Process()
+        with patch('openarm_platform.model_workspace.tcp_reachable', return_value=False), \
+             patch('openarm_platform.model_workspace.subprocess.Popen', return_value=replacement), \
+             patch.object(self.workspace, '_client', return_value=self.client):
+            self.workspace.load('other')
+        self.assertTrue(old.terminated)
+        self.assertFalse(replacement.terminated)
+        self.assertEqual(self.workspace.entry.id, 'other')
+        self.manager.claim_motion.assert_not_called()
 
     def start(self):
         self.tested()
@@ -258,6 +431,22 @@ class ModelWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.workspace.snapshot()['execution'], 'stopped_error')
         self.assertEqual(self.workspace.snapshot()['error'], 'safety stop（退出清理已确认）')
         self.assertTrue(self.manager.release_motion.call_args.kwargs['clean'])
+
+    def test_unverified_cleanup_preserves_original_failure_and_motion_lock(self):
+        child, _ = self.start()
+        episode = self.workspace.run_root / 'episode'
+        episode.mkdir()
+        reason = 'left: RuntimeError: Expected healthy Classic 1 Mbps'
+        (episode / 'summary.json').write_text(json.dumps(dict(complete=True,
+            termination={'cleanup_errors': [reason], 'error': reason})))
+        child.code = 1
+        self.workspace._finished()
+        state = self.workspace.snapshot()
+        self.assertIn(reason, state['error'])
+        self.assertIn('未确认正常清理', state['error'])
+        self.assertEqual(state['execution'], 'failed')
+        self.assertFalse(state['can_start'])
+        self.assertFalse(self.manager.release_motion.call_args.kwargs['clean'])
 
     def test_slow_control_handover_keeps_status_and_cancel_responsive(self):
         self.tested()

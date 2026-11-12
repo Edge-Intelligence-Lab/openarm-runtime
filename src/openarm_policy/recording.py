@@ -62,7 +62,7 @@ class CompactEpisodeRecorder:
                     values = self.summary.setdefault("inference_latency_s", {"count": 0, "sum": 0., "max": 0.})
                     values["count"] += 1; values["sum"] += latency; values["max"] = max(values["max"], latency)
                 return
-            if name in ("command", "handoff_hold", "preparation_command", "cartesian_dispatch",
+            if name in ("command", "handoff_hold", "preparation_command", "return_home_command", "cartesian_dispatch",
                         "cartesian_progress_wait", "cartesian_preparation_dispatch"):
                 # One terminal numeric snapshot replaces the previous one; no trajectory.
                 if name.startswith("cartesian_"):

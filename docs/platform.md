@@ -1,7 +1,7 @@
 # OpenArm Platform
 
 `openarm-runtime platform` brings motor control, teleoperation, tactile and
-vision, collection and policy visualization into one local workspace at **http://127.0.0.1:8888**. Use the sidebar to
+vision, collection and policy visualization into one local workspace at **http://127.0.0.1:8888**. Use the top mode menu to
 open each module; all pages, images and WebSocket connections pass through this
 one address. The dashboard uses NiceGUI components on FastAPI/Uvicorn, and
 aiohttp handles upstream HTTP, streaming responses and WebSocket connections.
@@ -18,17 +18,32 @@ python -m pip install "openarm-runtime[platform] @ git+https://github.com/Edge-I
 openarm-runtime platform --profile ~/.config/openarm-runtime/platform.json
 ```
 
-For development from a checkout:
+The maintained checkout entry is the repository-root `run_platform.py`, not an
+external workspace wrapper. Create the Python 3.12 project environment first:
 
 ```sh
 cd /path/to/openarm-runtime
-# Run with this checkout's activated Python 3.12 environment.
-python -m pip install -e ".[platform]"
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e ".[platform]"
 python3 run_platform.py
 ```
 
-Open http://127.0.0.1:8888 . The development launcher uses this checkout's `.venv` and
-`~/.config/openarm-runtime/platform.json`. It starts configured missing services,
+Open http://127.0.0.1:8888 . The launcher uses this checkout's `.venv` and
+`~/.config/openarm-runtime/platform.json`. An explicit `--profile /ABS/platform.json`
+selects another external installation profile; `--port` and `--attach-only` are
+also supported. `python3 run_platform.py --help` works before environment setup.
+Device paths, models and calibration remain in external configuration, never in
+the launcher. Optional hardware/model dependencies still need their own configured
+environments; the platform extra alone does not install every device backend.
+
+The launcher puts this checkout's `src` first on `PYTHONPATH` and marks it with
+`OPENARM_RUNTIME_SOURCE`. Platform-owned model/control children preserve that
+source priority while keeping their configured Python interpreter and dependency
+paths. This avoids silently running an old installed runtime from a model environment.
+Already running external services are not replaced by this mechanism. The entry
+does not run a CAN-before-web gate or automatically launch a policy session.
+
+It starts configured missing services,
 reuses existing listeners and leaves reused processes alone when it exits.
 Ctrl+C closes only services started by this platform. Child output is in
 `~/.local/state/openarm-platform/` (`control.log`, `teleop.log`, etc.).

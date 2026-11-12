@@ -107,6 +107,11 @@ survive a pause. A UI can build resume around this explicit contract.
 An optional fixed preparation runs after the single startup and before any model
 inference job. It uses feedback-gated absolute joint waypoints, then clears setup
 history and hands off without releasing the device lease or re-enabling motors.
+The web model workspace passes `--until-stopped`: no total task time limit,
+operator stop or a safety fault ends the session, and stopping never starts a return.
+The CLI still supports explicit `--duration` for bounded diagnostics; it is mutually
+exclusive with `--until-stopped`. Manual-stop mode cannot use `--auto-return-home`.
+
 Task duration excludes preparation. See [fixed preparation](model-adapters.md#fixed-preparation-and-automatic-handoff)
 for configuration, provenance, nominal-geometry trial opt-in and recording phases.
 

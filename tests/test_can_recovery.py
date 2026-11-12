@@ -90,6 +90,8 @@ class RecoveryTests(unittest.TestCase):
         with patch('openarm_runtime.telemetry.poll') as attempt:
             poll_reconnecting('can0', shared, stop, frame_format='classic')
         self.assertEqual(attempt.call_count, 8)
+        self.assertEqual(shared.metadata()['connection_attempts'], 8)
+        self.assertEqual(shared.metadata()['retry_delay_s'], 30)
         self.assertEqual([c.args[0] for c in stop.wait.call_args_list], [1, 2, 4, 8, 16, 30, 30, 30])
         self.assertTrue(all(c.kwargs['frame_format'] == 'classic' for c in attempt.call_args_list))
 

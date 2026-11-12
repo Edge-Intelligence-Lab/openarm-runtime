@@ -51,6 +51,8 @@ class Dashboard:
         self.revision = 0
         self.selection_error = ''
         self.status_error = False
+        self.stopping = False
+        self.connection_state = {}
         self.nav = {}
         self.cards = {}
         self.badges = {}
@@ -65,46 +67,47 @@ class Dashboard:
         ui.add_css(files('openarm_platform').joinpath('static/platform.css').read_text())
         ui.colors(primary='#36735a', secondary='#788d74', positive='#36735a', warning='#9a794a')
         with ui.row().classes('platform-shell'):
-            with ui.column().classes('platform-sidebar'):
-                self.home = tag(ui.button(on_click=self.overview).props('flat no-caps').classes('brand-button'), 'home-button')
-                with self.home:
-                    ui.icon('precision_manufacturing').classes('brand-icon')
-                    with ui.column().classes('brand-wordmark'):
-                        ui.label('OpenArm').classes('brand-name')
-                        ui.label('PLATFORM').classes('brand-caption')
-                ui.label('工作空间').classes('workspace-label')
-                if self.config.simulation_profile is not None:
-                    tag(ui.label('MUJOCO 仿真 · 实物连接禁用').classes('text-orange-9 font-semibold'), 'simulation-banner')
-                with tag(ui.column().classes('platform-navigation'), 'navigation'):
-                    for page in self.pages.values():
-                        self.nav[page.id] = tag(ui.button(page.label, icon=ICONS[page.id],
-                            on_click=lambda _, name=page.id: self.select(name)).props('flat no-caps')
-                            .classes('nav-button'), f'nav-{page.id}')
-                with ui.column().classes('sidebar-bottom'):
-                    with ui.row().classes('local-heading'):
-                        ui.icon('circle', size='7px')
-                        ui.label('本地工作站')
-                    ui.label('控制与感知，一个工作空间。').classes('sidebar-note')
-                    tag(ui.button('连接设置', icon='link', on_click=self.show_connection)
-                        .props('flat no-caps').classes('connection-button'), 'connection-toggle')
             with ui.column().classes('platform-main'):
                 with ui.row().classes('platform-header'):
-                    with ui.row().classes('breadcrumb'):
-                        ui.label(config_title := self.config.title).classes('breadcrumb-parent')
-                        ui.label('/').classes('breadcrumb-divider')
-                        self.current_label = tag(ui.label('概览'), 'current-label')
+                    self.home = tag(ui.button('OpenArm', icon='precision_manufacturing', on_click=self.overview)
+                        .props('flat dense no-caps aria-label="工作空间概览"').classes('brand-button'), 'home-button')
+                    self.mode_button = tag(ui.button('概览', icon='expand_more').props('flat dense no-caps')
+                        .classes('mode-button'), 'mode-switcher')
+                    self.current_label = self.mode_button  # Keep one accessible current-mode label.
+                    with self.mode_button:
+                        with ui.menu().classes('mode-menu') as self.mode_menu:
+                            ui.label('切换工作空间').classes('menu-caption')
+                            self.overview_item = ui.button('概览', icon='grid_view', on_click=lambda: self.choose_mode())
+                            self.overview_item.props('flat dense no-caps').classes('nav-button')
+                            with tag(ui.column().classes('platform-navigation'), 'navigation'):
+                                for page in self.pages.values():
+                                    self.nav[page.id] = tag(ui.button(page.label, icon=ICONS[page.id],
+                                        on_click=lambda _, name=page.id: self.choose_mode(name)).props('flat dense no-caps')
+                                        .classes('nav-button'), f'nav-{page.id}')
+                    ui.element('div').classes('header-spacer')
+                    if self.config.simulation_profile is not None:
+                        tag(ui.label('仿真 · 实物禁用').classes('simulation-badge'), 'simulation-banner')
                     with tag(ui.row().classes('page-actions'), 'page-actions') as self.actions:
                         self.current_status = tag(ui.label('状态未知').classes('current-status'), 'current-status')
-                        self.reload = tag(ui.button(icon='refresh', on_click=self.refresh)
-                            .props('flat round dense aria-label="重新加载当前模块"'), 'reload-page')
-                        self.external = tag(ui.link('新窗口打开 ↗', '/', new_tab=True).classes('external-link'), 'external-page')
                     self.actions.set_visibility(False)
+                    self.connection_button = tag(ui.button('CAN 待检查', icon='circle', on_click=self.show_connection)
+                        .props('flat dense no-caps').classes('connection-status'), 'connection-toggle')
+                    self.stop_button = tag(ui.button('停止运动', icon='stop', color='negative', on_click=self.stop_motion)
+                        .props('unelevated dense no-caps').classes('motion-stop'), 'stop-motion')
+                    self.stop_button.set_enabled(not self.attach_only)
+                    with self.stop_button:
+                        ui.tooltip('请求停止本平台管理的运动；不是硬件急停。外部控制需在原入口停止。')
+                    with tag(ui.button(icon='more_horiz').props('flat round dense aria-label="更多操作"'), 'more-actions'):
+                        with ui.menu().classes('mode-menu'):
+                            self.reload = tag(ui.button('重新加载当前模块', icon='refresh', on_click=self.refresh)
+                                .props('flat dense no-caps').classes('nav-button'), 'reload-page')
+                            self.external = tag(ui.link('新窗口打开 ↗', '/', new_tab=True).classes('external-link'), 'external-page')
+                            ui.button('连接设置与帮助', icon='link', on_click=self.show_connection).props('flat dense no-caps').classes('nav-button')
                 self.notice = tag(ui.label('').classes('service-notice').props('role=status aria-live=polite'), 'service-notice')
                 self.notice.set_visibility(False)
                 with tag(ui.column().classes('platform-overview'), 'overview') as self.overview_panel:
-                    ui.label('YOUR ROBOTICS WORKSPACE').classes('eyebrow')
-                    tag(ui.label(config_title).classes('overview-title'), 'overview-title')
-                    ui.label('电机控制、遥操、感知、数采与策略，一个地址即可使用。').classes('overview-description')
+                    tag(ui.label(self.config.title).classes('overview-title'), 'overview-title')
+                    ui.label('选择工作空间；使用过程中也可从顶部切换。').classes('overview-description')
                     with tag(ui.grid(columns=2).classes('module-grid'), 'module-grid'):
                         for index, page in enumerate(self.pages.values(), 1):
                             with ui.card().classes('module-card'):
@@ -126,7 +129,7 @@ class Dashboard:
                         ui.label('服务就绪后自动显示模块。').classes('waiting-description')
                 self.views.set_visibility(False)
                 with ui.row().classes('platform-footer'):
-                    self.footer = tag(ui.label(f'{len(self.pages)} 个模块 · 同一个工作空间'), 'footer-caption')
+                    self.footer = tag(ui.label(f'{len(self.pages)} 个模块 · 同一个工作空间').classes('footer-caption'), 'footer-caption')
                     tag(ui.button('连接帮助', icon='north_east', on_click=self.show_connection)
                         .props('flat dense no-caps').classes('footer-help'), 'footer-connection')
         with tag(ui.dialog(), 'connection-dialog') as self.connection_dialog:
@@ -136,6 +139,7 @@ class Dashboard:
                     tag(ui.button(icon='close', on_click=self.connection_dialog.close)
                         .props('flat round dense aria-label="关闭连接设置"'), 'connection-close')
                 ui.label('在本机直接打开平台。使用其他电脑时，只需保持这一条 SSH 转发开启。').classes('connection-description')
+                self.connection_detail = ui.label('连接状态尚未读取').classes('connection-description whitespace-pre-wrap')
                 self.command = tag(ui.label(ssh_command(self.config.port, self.config.port,self.config.host)).classes('ssh-command'), 'ssh-command')
                 tag(ui.button('复制命令', icon='content_copy', on_click=self.copy_command).props('no-caps'), 'copy-command')
                 ui.label('画面和实时连接都通过这一个入口。设备是否正常，请查看模块内的状态。').classes('connection-note')
@@ -144,6 +148,7 @@ class Dashboard:
                 ui.label('确认操作').classes('dialog-title')
                 self.confirm_message = tag(ui.label('').classes('confirm-message'), 'confirm-message')
                 with ui.row().classes('dialog-actions'):
+                    ui.button('停止运动', icon='stop', on_click=self.stop_motion).props('flat dense no-caps').classes('text-red-8')
                     tag(ui.button('取消', on_click=lambda: self.confirm_dialog.submit(False)).props('flat no-caps'), 'confirm-cancel')
                     tag(ui.button('继续', on_click=lambda: self.confirm_dialog.submit(True)).props('no-caps'), 'confirm-continue')
 
@@ -171,6 +176,30 @@ class Dashboard:
         self._render()
         await self._set_hash()
 
+    async def choose_mode(self, name=None):
+        # Closing/opening the menu never removes controller iframes.
+        self.mode_menu.close()
+        if name is None:
+            await self.overview()
+        else:
+            await self.select(name)
+
+    async def stop_motion(self):
+        if self.attach_only or self.stopping:
+            return
+        self.stopping = True
+        if self.confirm_dialog.value:
+            self.confirm_dialog.submit(False)
+        self.stop_button.set_enabled(False)
+        try:
+            self.statuses = await self.coordinator.stop_motion()
+            self.selection_error = '已请求停止运动，请等待原控制会话完成退出清理。'
+        except Exception as exc:
+            self.selection_error = str(exc) or '停止请求未确认，请现场检查。'
+        finally:
+            self.stopping = False
+            self._render()
+
     async def show_connection(self):
         # SSH local and remote ports may intentionally differ.
         try:
@@ -197,6 +226,12 @@ class Dashboard:
             if revision == self.revision:
                 self.statuses = states
                 self.status_error = False
+            try:
+                connection = await self.coordinator.connection_status()
+                if isinstance(connection, dict):
+                    self.connection_state = connection
+            except Exception:
+                self.connection_state = dict(state='unknown', message='连接状态暂不可用，正在重试')
         except Exception:
             if revision == self.revision:
                 self.status_error = True
@@ -298,6 +333,19 @@ class Dashboard:
             self.nav[name].set_enabled(not self.busy)
             self.cards[name].set_enabled(not self.busy)
         self.home.set_enabled(not self.busy)
+        self.mode_button.set_enabled(not self.busy)
+        self.overview_item.set_enabled(not self.busy)
+        # Stop is outside the iframe/inert region and remains reachable during
+        # selection, loading and status failures. This is not a hardware E-stop.
+        self.stop_button.set_enabled(not self.attach_only and not self.stopping)
+        connection = self.connection_state
+        label = {'ready': 'CAN 就绪', 'waiting': 'CAN 连接中', 'busy': 'CAN 控制占用',
+                 'blocked': 'CAN 需检查', 'unconfigured': 'CAN 未检查', 'unmonitored': 'CAN 待检查',
+                 'simulation': '仿真', 'readonly': '只读模式'}.get(connection.get('state'), '连接待检查')
+        self.connection_button.set_text(label)
+        self.connection_button.props('data-state='+connection.get('state', 'unknown'))
+        self.connection_detail.set_text(connection.get('message', '连接状态尚未读取') +
+                                       ('\n'+connection['error'] if connection.get('error') else ''))
         self.overview_panel.set_visibility(self.active is None)
         self.views.set_visibility(self.active is not None)
         self.views.props(f'aria-busy={str(self.busy).lower()}')
@@ -333,9 +381,13 @@ class Dashboard:
                                  else '数采页显示录制状态与历史数据 · 当前设备连接保持不变' if page.id == 'collection'
                                  else ('主臂控制姿态与夹爪 · 标定只采样求解 · 保存不等于启用' if self.config.teleop_calibration_profile
                                        else '镜头内参不控制机械臂 · 保存不等于启用') if page.id == 'camera_calibration'
-                                 else '策略页支持仿真和记录回放 · 当前设备连接保持不变' if page.path else '切换到感知页面会保留当前控制或遥操连接')
+                                 else '模型执行与归位由操作员启动 · 停止不会触发自动返程' if page.id == 'policy'
+                                 else '切换到感知页面会保留当前控制或遥操连接')
         else:
             self.current_label.set_text('概览')
+            self.reload.set_enabled(False)
+            self.external.props('aria-disabled=true tabindex=-1')
+            self.external.classes(add='disabled-link')
             self.footer.set_text(f'{len(self.pages)} 个模块 · 同一个工作空间')
         self.notice.set_text(message)
         self.notice.set_visibility(bool(message))

@@ -24,6 +24,58 @@ def process(pid=10000):
 
 
 class PlatformServiceTests(unittest.TestCase):
+    def test_top_stop_only_closes_owned_motion_and_keeps_capture_alive(self):
+        control, camera = process(10001), process(10002)
+        with tempfile.TemporaryDirectory() as logs, \
+             patch('openarm_platform.services.tcp_reachable', return_value=False), \
+             patch('openarm_platform.services.subprocess.Popen', side_effect=[control, camera]), \
+             patch.object(ServiceManager, '_alive', return_value=False), \
+             patch.object(ServiceManager, '_signal') as signal_group:
+            manager = ServiceManager([page(group='motion'), page('vision', 5003)], logs).start()
+            state = manager.stop_motion()
+            control.terminate.assert_called_once()
+            camera.terminate.assert_not_called()
+            signal_group.assert_not_called()
+            self.assertEqual(state['control']['state'], 'standby')
+            self.assertIs(manager._services['vision'].process, camera)
+            manager.close()
+
+    def test_top_stop_does_not_signal_external_services_or_release_model_lease(self):
+        with patch('openarm_platform.services.tcp_reachable', return_value=True):
+            manager = ServiceManager([page(group='motion')], '/unused').start()
+            with self.assertRaisesRegex(ValueError, '外部控制'):
+                manager.stop_motion()
+            manager.close()
+        with patch('openarm_platform.services.tcp_reachable', return_value=False):
+            manager = ServiceManager([], '/unused').start()
+            manager.claim_motion('model-session')
+            manager.stop_motion()
+            self.assertEqual(manager._motion_owner, 'model-session')
+            manager.release_motion('model-session', clean=True)
+            manager.close()
+    def test_read_connections_pause_before_granting_motion_and_close_with_manager(self):
+        with patch('openarm_platform.services.tcp_reachable', return_value=False):
+            manager = ServiceManager([], '/unused').start()
+            reader = Mock()
+            manager.register_passive_reader(reader)
+            manager.claim_motion('operator-start')
+            reader.pause.assert_called_once()
+            self.assertTrue(manager.motion_active())
+            manager.release_motion('operator-start', clean=True)
+            self.assertFalse(manager.motion_active())
+            manager.close()
+            reader.close.assert_called_once()
+
+    def test_probe_cleanup_failure_blocks_motion_instead_of_launching_a_controller(self):
+        with patch('openarm_platform.services.tcp_reachable', return_value=False):
+            manager = ServiceManager([], '/unused').start()
+            reader = Mock(); reader.pause.side_effect = RuntimeError('reader still stopping')
+            manager.register_passive_reader(reader)
+            with self.assertRaisesRegex(RuntimeError, 'reader still stopping'):
+                manager.claim_motion('operator-start')
+            self.assertIsNone(manager._motion_owner)
+            manager.close()
+
     def test_construction_is_passive_and_invalid_ids_are_rejected(self):
         with patch("openarm_platform.services.tcp_reachable") as probe, \
              patch("openarm_platform.services.subprocess.Popen") as spawn:

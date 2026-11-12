@@ -84,7 +84,25 @@ assert not any(x in sys.modules for x in ('viser', 'serial', 'openarm_can', 'pax
 
 
 PLATFORM_INSTALLED = all(importlib.util.find_spec(name) is not None
-                          for name in ('nicegui', 'aiohttp', 'fastapi'))
+                           for name in ('nicegui', 'aiohttp', 'fastapi'))
+
+
+class TopStopCoordinatorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_stop_is_requested_before_owned_service_shutdown(self):
+        events = []
+        manager, models = Mock(), Mock()
+        models.stop.side_effect = lambda: events.append('model-stop')
+        manager.stop_motion.side_effect = lambda: events.append('service-stop') or {}
+        coordinator = Coordinator(manager)
+        coordinator.models = models
+        await coordinator.stop_motion()
+        self.assertEqual(events, ['model-stop', 'service-stop'])
+
+    async def test_attach_only_never_issues_stop(self):
+        manager = Mock()
+        coordinator = Coordinator(manager, attach_only=True)
+        with self.assertRaises(ValueError): await coordinator.stop_motion()
+        manager.stop_motion.assert_not_called()
 
 
 class LocalBoundaryTests(unittest.IsolatedAsyncioTestCase):

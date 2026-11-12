@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Run web-launched models until operator stop or a safety fault, without a total
+  task duration limit. Remove the model duration and automatic-return controls;
+  keep independent home requests, disconnect stop and existing safety timeouts.
+- Automatically validate registered sample inputs during model loading; remove
+  the separate web test step and allow idle inference-model replacement. Keep
+  errors visible with detailed hover help, and shorten model-page labels.
+- Make repository-root `run_platform.py` the maintained checkout entry with early
+  help, explicit external profile selection and checkout-first source imports for
+  the web process and its model/control children.
+- Replace the persistent sidebar with a compact top mode menu and full-width
+  workspaces. Preserve iframe lifetimes and confirmed control handovers; keep
+  connection state and an owned-motion stop request visible outside the workspace.
+  Tighten overview/model-page spacing without hiding safety/cleanup state.
+- Keep the model page available while CAN is missing: reuse query-only bounded
+  reconnect workers, expose connection/backoff state and release read ownership
+  before any managed motion handover. Never enable, reset buses or resume motion
+  on recovery. Keep UI polling/stop controls alive across transient status errors.
+- Add operator-started natural-hanging return on the model page, independent of
+  model loading, plus CLI-only optional return after explicit duration completion. Reuse
+  declared preparation waypoints in reverse, holding the gripper goal. Preserve
+  motion ownership, cancellation, feedback and cleanup; stops/faults never start
+  a return. Require an explicit installation-specific home target; no obstacle
+  planning or physical acceptance is implied.
 - Align shared arm J1–J7 motor-coordinate intervals with the official OpenArm 2.0
   URDF; retain existing gripper bounds/calibration. This also changes the allowed
   domain of teleoperation and preparation, not just the web policy workspace.

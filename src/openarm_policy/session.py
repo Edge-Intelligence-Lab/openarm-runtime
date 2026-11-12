@@ -40,7 +40,8 @@ class PolicySession:
     Future chunks wait while the active chunk continues. A gap holds the last
     target only for command_timeout_s, then terminates the episode.
     """
-    def __init__(self, robot, policy, *, sources=(), config=None, task="", recorder=None, preparation=None, on_event=None):
+    def __init__(self, robot, policy, *, sources=(), config=None, task="", recorder=None, preparation=None,
+                 return_home=None, on_event=None):
         self.robot, self.policy = robot, policy
         self.sources = tuple(sources)
         self.config = config or SessionConfig()
@@ -53,10 +54,13 @@ class PolicySession:
         self.cancel = threading.Event()
         self.state = "idle"
         self.preparation = preparation
+        self.return_home = return_home
         self._handoff_hold = None
-        if preparation is not None:
+        if preparation is not None or return_home is not None:
             try:
-                preparation.bind(robot, self.context)
+                for stage in (preparation, return_home):
+                    if stage is not None:
+                        stage.bind(robot, self.context)
             except BaseException as exc:
                 # Constructor validation precedes robot.start(): no motor worker
                 # exists, so report a truthful startup rejection, not lost cleanup.
@@ -101,40 +105,51 @@ class PolicySession:
                     raise
             self.cancel.wait(.02)
 
-    def _prepare(self):
-        if self.preparation is None:
+    def _prepare(self, *, returning=False):
+        stage = self.return_home if returning else self.preparation
+        if stage is None or self.cancel.is_set():
             return
-        self.state = "preparing"
+        phase = 'return_home' if returning else 'preparation'
+        self.state = "returning_home" if returning else "preparing"
         if hasattr(self.robot, "begin_preparation"):
             self.robot.begin_preparation()
-        initial = self._observe()
-        plan = self.preparation.begin(initial)
-        self._record("preparation_started", phase="preparation", plan=plan)
-        self._record("observation", phase="preparation", observation=initial)
+        # Returning uses only fresh robot feedback, not cameras or more inference.
+        robot_buffer = ObservationBuffer(self.robot.streams, 1) if returning else None
+        observe = (lambda: robot_buffer.collect(self.robot.snapshot())) if returning else self._observe
+        initial = observe()
+        reference = getattr(self.robot, 'reference', None) if returning else None
+        plan = stage.begin(initial) if reference is None else stage.begin(initial, commanded_joints=tuple(reference))
+        self._record(phase+"_started", phase=phase, plan=plan)
+        self._record("observation", phase=phase, observation=initial)
         period = 1 / self.config.control_hz
         previous = time.monotonic()
         last_waypoint = None
         while not self.cancel.is_set():
             tick = time.monotonic()
             if tick-previous > max(.25, 3*period):
-                raise TimeoutError("Preparation deadline missed")
+                raise TimeoutError(f"{phase} deadline missed")
             previous = tick
-            observation = self._observe()
+            observation = observe()
             if self.cancel.is_set():
                 return
-            self._record("observation", phase="preparation", observation=observation)
-            step = self.preparation.step(observation)
+            self._record("observation", phase=phase, observation=observation)
+            step = stage.step(observation)
+            if self.cancel.is_set():
+                return
             deadline = time.monotonic() + self.config.command_timeout_s
             submit = getattr(self.robot, "submit_preparation", self.robot.submit)
             submit(step.values, deadline)
-            self._record("preparation_command", phase="preparation", values=step.values,
-                         names=self.preparation.spec.names, kind=self.preparation.spec.kind,
+            self._record(phase+"_command", phase=phase, values=step.values,
+                         names=stage.spec.names, kind=stage.spec.kind,
                          waypoint=step.waypoint, progress=step.progress, valid_until=deadline,
                          arrival=step.arrival)
             if step.waypoint != last_waypoint:
-                self._record("preparation_waypoint", phase="preparation", waypoint=step.waypoint)
+                self._record(phase+"_waypoint", phase=phase, waypoint=step.waypoint)
                 last_waypoint = step.waypoint
             if step.completed:
+                if returning:
+                    self._record('return_home_completed', phase=phase, elapsed_s=tick-initial.captured_at)
+                    return
                 if hasattr(self.robot, "finish_preparation"):
                     self._handoff_hold = self.robot.finish_preparation()
                 else:
@@ -146,17 +161,26 @@ class PolicySession:
                 return
             self.cancel.wait(max(0, period-(time.monotonic()-tick)))
 
-    def run(self, duration_s=None):
+    def run(self, duration_s=None, *, home_only=False):
         if self.state != "idle":
             raise RuntimeError("Create a new session for each episode")
         if duration_s is not None and (not finite(duration_s) or duration_s <= 0):
             raise ValueError("duration_s must be positive")
+        if type(home_only) is not bool or home_only and (self.return_home is None or self.sources):
+            raise ValueError('Home-only requires a return route and no model/sensor sources')
         worker = None
         primary_error = None
         stop_reason = 'operator_stop'
         self.state = "starting"
         try:
             self._record("context", context=asdict(self.context), config=asdict(self.config))
+            if home_only:
+                if self.cancel.is_set():
+                    return
+                self.robot.start()
+                self._prepare(returning=True)
+                stop_reason = 'home_completed' if not self.cancel.is_set() else 'operator_stop'
+                return
             worker = InferenceWorker(self.policy, self.context)
             worker.ready(self.config.reset_timeout_s, self.cancel.is_set)
             self._wait_for_sources()
@@ -219,6 +243,12 @@ class PolicySession:
                     request, sent_at = observation, time.monotonic()
                     next_infer = sent_at + 1 / self.config.inference_hz
                 self.cancel.wait(max(0, period - (time.monotonic() - tick)))
+            if stop_reason == 'duration_reached' and not self.cancel.is_set() and self.return_home is not None:
+                # Never return from finally: cancellation/faults must disable,
+                # not initiate another motion after the operator asked to stop.
+                self._prepare(returning=True)
+                if self.cancel.is_set():
+                    stop_reason = 'operator_stop'
         except BaseException as exc:
             primary_error = exc
             self.state = "failed"

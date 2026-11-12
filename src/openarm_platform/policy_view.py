@@ -57,25 +57,27 @@ class PolicyView:
         ui.colors(primary='#36735a')
         ui.add_css('''
             body { background: #f6f8f5; color: #263d32; }
-            .policy-workspace { width:100%; max-width:1280px; margin:auto; padding:24px; gap:18px; }
-            .policy-toolbar { width:100%; align-items:center; gap:16px; flex-wrap:wrap; }
-            .policy-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); width:100%; gap:12px; }
-            .policy-metric { padding:16px; background:white; border:1px solid #dfe7df; border-radius:12px; }
+            .policy-workspace { width:100%; max-width:none; margin:0; padding:14px 16px; gap:12px!important; }
+            .policy-toolbar { width:100%; align-items:center; gap:8px!important; flex-wrap:wrap; }
+            .policy-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); width:100%; gap:8px; }
+            .policy-metric { padding:10px 12px; background:white; border:1px solid #dfe7df; border-radius:7px; }
             .policy-metric-caption { font-size:12px; color:#6f8074; }
-            .policy-metric-value { font-size:22px; font-weight:600; margin-top:6px; }
-            .policy-card { width:100%; box-shadow:none!important; border:1px solid #dfe7df; border-radius:12px; }
-            @media(max-width:650px) { .policy-workspace {padding:14px;} .policy-metrics {grid-template-columns:repeat(2,minmax(0,1fr));} }
+            .policy-metric-value { font-size:20px; font-weight:600; margin-top:3px; }
+            .policy-card { width:100%; box-shadow:none!important; border:1px solid #dfe7df; border-radius:7px; padding:12px!important; gap:8px!important; }
+            .policy-workspace .q-btn { min-height:32px; font-size:12px; }
+            @media(max-width:650px) { .policy-workspace {padding:10px;} .policy-metrics {grid-template-columns:repeat(2,minmax(0,1fr));} }
         ''')
         with ui.column().classes('policy-workspace') as workspace:
             with ui.row().classes('policy-toolbar'):
                 with ui.column().classes('gap-1 grow'):
-                    ui.label('模型与执行').classes('text-2xl font-semibold')
-                    ui.label(f'OpenArm {__version__} · 模型部署、独立仿真与记录回放').classes('text-sm text-grey-7')
-                self.source = ui.badge('等待策略', color='primary').props('data-testid=policy-source')
+                    ui.label('模型与执行').classes('text-xl font-semibold')
+                    with ui.label(f'OpenArm {__version__}').classes('text-xs text-grey-7'):
+                        ui.tooltip('模型部署、独立仿真与记录回放。加载模型不会启动机械臂。')
             if models is not None:
                 from .model_view import ModelView
                 self.models = ModelView(models)
             legacy_start = len(workspace.default_slot.children)
+            self.source = ui.badge('等待策略', color='primary').props('data-testid=policy-source')
             with ui.row().classes('policy-metrics'):
                 self.metrics = {}
                 for key, label in [('state', '会话状态'), ('duration', '采样时间'), ('commands', '已提交指令'), ('latency', '最近推理延迟')]:
@@ -88,14 +90,16 @@ class PolicyView:
                     self.duration = ui.number('时长（秒）', value=10, min=1, max=60, step=1).classes('w-28')
                     self.start_button = ui.button('开始仿真', icon='play_arrow', on_click=self.start).props('data-testid=policy-start')
                     self.stop_button = ui.button('停止仿真', icon='stop', on_click=preview.stop).props('outline data-testid=policy-stop')
-                ui.label('仿真使用理想位置模型；指令与反馈分别显示。').classes('text-xs text-grey-7')
+                with self.start_button:
+                    ui.tooltip('仿真使用理想位置模型，不控制实物；指令与反馈分别显示。')
                 with ui.expansion('打开策略记录', icon='folder_open').classes('w-full'):
                     ui.label(str(preview.record_root)).classes('text-xs text-grey-7 break-all')
                     with ui.row().classes('policy-toolbar'):
                         self.episode = ui.select(preview.episodes(), label='会话目录').classes('grow').props('data-testid=policy-episode')
                         ui.button('刷新列表', icon='refresh', on_click=self.refresh_episodes).props('flat')
                         self.load_button = ui.button('加载回放', on_click=self.load).props('outline data-testid=policy-load')
-                    ui.label('读取会话中的 events.jsonl；回放显示记录时的反馈。').classes('text-xs text-grey-7')
+                    with self.load_button:
+                        ui.tooltip('读取会话中的 events.jsonl；显示记录时的反馈，不控制实物。')
             self.error = ui.label('').classes('text-red-8 whitespace-pre-wrap').props('role=alert data-testid=policy-error')
             with ui.card().classes('policy-card'):
                 with ui.row().classes('policy-toolbar'):
@@ -115,12 +119,15 @@ class PolicyView:
                     self.play_button = ui.button('播放回放', icon='play_arrow', on_click=self.toggle_play).props('flat data-testid=policy-play')
                     self.slider = ui.slider(min=0, max=1, step=.01, value=0, on_change=self.seek).classes('grow').props('data-testid=policy-time')
                     self.time_label = ui.label('0.00 s').classes('text-sm')
-                ui.label('图表保留最近 2,000 个采样事件；拖动时间轴查看对应关节值。').classes('text-xs text-grey-7')
+                with self.slider:
+                    ui.tooltip('图表保留最近 2,000 个采样事件；拖动查看对应关节值。')
             columns = [dict(name=key, label=label, field=key, align='left') for key, label in
                        [('joint', '关节'), ('target', '提交目标（°）'), ('feedback', '反馈采样（°）'), ('error', '目标 − 反馈（°）')]]
             self.table = ui.table(columns=columns, rows=[], row_key='name').classes('policy-card').props('flat dense data-testid=policy-joints')
             if models is not None:
-                legacy = ui.expansion('独立仿真与历史回放 · 不控制实物', icon='history').classes('w-full')
+                legacy = ui.expansion('仿真与回放', icon='history').classes('w-full')
+                with legacy:
+                    ui.tooltip('独立仿真与历史回放，不控制实物。')
                 for element in list(workspace.default_slot.children)[legacy_start:-1]:
                     element.move(legacy)
         self.render()

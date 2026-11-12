@@ -182,6 +182,45 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.dashboard.command.text.count('-L '), 1)
         self.coordinator.activate.assert_not_awaited()
 
+    async def test_mode_menu_does_not_rebuild_or_activate_current_controller(self):
+        d = self.dashboard
+        with self.client:
+            await d.select('control')
+            controller = d.frames['control'].element
+            calls = self.coordinator.activate.await_count
+            d.mode_menu.open()
+            d.mode_menu.close()
+            self.assertEqual(self.coordinator.activate.await_count, calls)
+            self.assertIs(d.frames['control'].element, controller)
+            self.assertTrue(controller.visible)
+            self.assertFalse(any('platform-sidebar' in e.classes for e in self.client.elements.values()))
+            await d.choose_mode('vision')
+            self.assertEqual(d.mode_button.text, '视觉')
+            self.assertIs(d.frames['control'].element, controller)
+
+    async def test_top_stop_stays_available_during_switching_and_poll_failure(self):
+        d = self.dashboard
+        self.coordinator.stop_motion.return_value = copy.deepcopy(self.states)
+        with self.client:
+            d.busy = True
+            d.status_error = True
+            d._render()
+            self.assertTrue(d.stop_button.enabled)
+            self.assertFalse(d.mode_button.enabled)
+            await d.stop_motion()
+            self.coordinator.stop_motion.assert_awaited_once()
+            self.assertIn('请求停止', d.notice.text)
+            self.assertTrue(d.stop_button.enabled)
+
+    async def test_readonly_top_stop_cannot_request_control(self):
+        d = self.dashboard
+        d.attach_only = True
+        with self.client:
+            d._render()
+            self.assertFalse(d.stop_button.enabled)
+            await d.stop_motion()
+        self.coordinator.stop_motion.assert_not_awaited()
+
 
 if __name__ == '__main__':
     unittest.main()

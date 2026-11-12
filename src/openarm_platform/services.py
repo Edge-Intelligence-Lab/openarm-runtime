@@ -63,7 +63,24 @@ class ServiceManager:
         self._closing = False
         self._blocked_groups = {}
         self._motion_owner = None
+        self._passive_readers = []
         self._lock = threading.RLock()
+
+    def register_passive_reader(self, reader):
+        with self._lock:
+            if reader not in self._passive_readers:
+                self._passive_readers.append(reader)
+
+    def motion_active(self):
+        """Read-only probes must yield to owned or external control services."""
+        with self._lock:
+            return bool(self._motion_owner is not None or 'motion' in self._blocked_groups or
+                any(s.group == 'motion' and (s.process is not None or tcp_reachable(s.page.port))
+                    for s in self._services.values()))
+
+    def _pause_readers(self):
+        for reader in self._passive_readers:
+            reader.pause()
 
     def _launch(self, service):
         page = service.page
@@ -170,6 +187,8 @@ class ServiceManager:
                 return self.status()
             if target.group in self._blocked_groups:
                 raise ValueError(self._blocked_groups[target.group])
+            if target.group == 'motion':
+                self._pause_readers()
             peers = [s for s in self._services.values() if s is not target and s.group == target.group]
             for peer in peers:
                 if peer.process is None and tcp_reachable(peer.page.port):
@@ -237,6 +256,7 @@ class ServiceManager:
                 raise ValueError('平台服务尚未就绪或正在关闭')
             if self._motion_owner is not None or 'motion' in self._blocked_groups:
                 raise ValueError(self._blocked_groups.get('motion', '已有模型执行占用控制'))
+            self._pause_readers()
             peers = [s for s in self._services.values() if s.group == 'motion']
             for peer in peers:
                 if peer.process is None and tcp_reachable(peer.page.port):
@@ -260,6 +280,28 @@ class ServiceManager:
             self._motion_owner = None
             if not clean:
                 self._blocked_groups['motion'] = '模型会话未确认正常清理，请现场检查后重启平台'
+
+    def stop_motion(self):
+        """Request normal shutdown of owned motion services only, never sensors.
+
+        A model CLI was signalled separately by the coordinator; retain its lease
+        until its existing monitor verifies cleanup. Never force-kill or resume.
+        """
+        with self._lock:
+            owned = [s for s in self._services.values() if s.group == 'motion' and s.process is not None]
+            failures, forced = self._stop_services(owned)
+            for service in owned:
+                if service.process is None:
+                    service.standby = True
+            if failures or forced:
+                message = '运动服务退出清理尚未确认，请现场检查；未强制终止。'
+                self._blocked_groups['motion'] = message
+                raise RuntimeError(message + ' '.join(failures))
+            external = [s.label for s in self._services.values() if s.group == 'motion'
+                        and s.process is None and tcp_reachable(s.page.port)]
+            if external:
+                raise ValueError('已请求停止本平台运动；外部控制需在原入口停止：'+', '.join(external))
+            return self.status()
 
     @staticmethod
     def _signal(process, sig):
@@ -346,9 +388,16 @@ class ServiceManager:
             if self._motion_owner is not None:
                 raise RuntimeError('模型执行尚未确认停止，不能关闭其依赖服务；未强制终止控制进程')
             self._closing = True
+            reader_failures = []
+            for reader in self._passive_readers:
+                try:
+                    reader.close()
+                except Exception as exc:
+                    reader_failures.append(str(exc))
             owned = [s for s in self._services.values() if s.process is not None]
             failures, _ = self._stop_services(owned)
-            self._closed = not any(s.process is not None for s in self._services.values())
+            failures += reader_failures
+            self._closed = not reader_failures and not any(s.process is not None for s in self._services.values())
             if failures:
                 raise RuntimeError("Service cleanup failed: " + "; ".join(failures))
 

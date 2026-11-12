@@ -59,6 +59,13 @@ openarm-runtime policy --robot simulate --duration 3
 See [policy contracts, adapters, recording and physical execution](docs/policy.md).
 See [official arm limits, soft-boundary holding and hard feedback guards](docs/joint-boundary.md)
 for the shared joint-range change and Cartesian policy's command reserve.
+The model page also supports [one-click natural-hanging return](docs/natural-hanging-return.md)
+through an explicitly configured reverse preparation route, without loading a model for manual return.
+Web-launched models run until operator stop or a safety fault; stopping never starts a return.
+Missing CAN does not block the page: [background query-only reconnection](docs/connection-recovery.md)
+reports readiness without automatically enabling or resuming motion.
+[Compact top navigation](docs/compact-navigation.md) keeps mode switching on demand,
+with full-width workspaces, visible connection state and an owned-motion stop request.
 For reusable checkpoint/input/output plugins and the initial pure-visual ACT
 upright integration, see [model adapters and deployment](docs/model-adapters.md).
 Cartesian policy execution is an explicit geometry-declared capability, not joint-vector
@@ -175,8 +182,12 @@ openarm-runtime platform --profile ~/.config/openarm-runtime/platform.json
 
 Install each configured module's extras as well (`leader,viewer,follower`,
 `tactile,viewer`, and/or `video`); the platform extra does not install hardware
-SDKs. In a configured development checkout, `python3 run_platform.py` selects
-the project's environment automatically. For another computer, only one SSH
+SDKs. The maintained checkout entry is `python3 run_platform.py`: it selects
+the project's `.venv`, current checkout source and external personal platform
+profile. Use `--profile /ABS/platform.json` for an explicit configuration, or
+`--help` before setup. No external wrapper is required. The model page uses
+**select → load → start**, with automatic sample checks and detailed hover help.
+For another computer, only one SSH
 forward is needed, including camera images and all Viser connections:
 
 ```sh
@@ -184,7 +195,7 @@ ssh -N -L 8888:127.0.0.1:8888 USER@WORKSTATION
 ```
 
 Control and teleoperation switch as mutually exclusive modes from the same
-sidebar; tactile and vision can stay connected alongside them. Startup never
+top mode menu; tactile and vision can stay connected alongside them. Startup never
 enables a motor or starts following. Stop the old independent controllers using
 their normal procedure before replacing their launches with the platform.
 Existing services can be reused but remain externally owned.

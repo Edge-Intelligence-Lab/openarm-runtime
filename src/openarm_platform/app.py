@@ -26,6 +26,7 @@ class Coordinator:
         self.builtin_pages = tuple(builtin_pages)
         self.attach_only = attach_only
         self.closing = False
+        self.models = None
         self._operations = set()
 
     async def _call(self, function, *args):
@@ -59,6 +60,22 @@ class Coordinator:
     async def deactivate(self,name):
         if self.attach_only:raise ValueError('只读模式不能停止服务')
         return self.with_builtin(await self._call(self.manager.deactivate,name))
+
+    async def connection_status(self):
+        if self.models is None:
+            return dict(state='unmonitored', message='连接在执行前检查')
+        if self.attach_only:
+            return dict(state='readonly', message='只读平台，不自动查询或控制实物')
+        if self.models.simulation:
+            return dict(state='simulation', message='显式仿真平台，实物连接禁用')
+        return await self._call(self.models.connectivity.snapshot)
+
+    async def stop_motion(self):
+        if self.attach_only:
+            raise ValueError('只读平台不能停止外部控制')
+        if self.models is not None:
+            await self._call(self.models.stop)
+        return self.with_builtin(await self._call(self.manager.stop_motion))
 
     def begin_shutdown(self):
         self.closing = True
@@ -166,6 +183,7 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
     models = ModelWorkspace(config.model_catalog, config.policy_record_root / 'deployment',
                             manager, readonly=attach_only, simulation=simulation is not None)
     models.video_preview_port = next((p.port for p in config.services if p.id == 'vision'), None)
+    coordinator.models = models
     if models.port is not None and models.port in {config.port, *[p.port for p in config.services],
                                                  *[port for p in config.services for port in p.extra_ports]}:
         raise ValueError('模型推理端口必须与平台和其他服务端口不同')
@@ -184,6 +202,9 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
             if simulation is not None:
                 await asyncio.to_thread(simulation.start)
             await coordinator.start()
+            # Missing CAN must not prevent the web server from accepting pages.
+            # This starts query-only workers, never a model or motion controller.
+            models.start_connectivity()
             yield
         finally:
             # Model execution must release/disable through the existing CLI before
@@ -238,7 +259,11 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
 
     @app.get('/api/models')
     async def model_status():
-        return JSONResponse(await asyncio.to_thread(models.snapshot), headers={'Cache-Control': 'no-store'})
+        try:
+            return JSONResponse(await asyncio.to_thread(models.snapshot), headers={'Cache-Control': 'no-store'})
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            return JSONResponse({'error': '状态暂不可用，请稍后重试：'+str(exc), 'retryable': True},
+                                status_code=503, headers={'Cache-Control': 'no-store'})
 
     @app.get('/api/models/input-image/{key}')
     async def model_input_image(key: str):

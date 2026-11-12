@@ -116,10 +116,14 @@ class FixedJointPreparation:
         self.spec.validate(values)
         return values
 
-    def begin(self, observation):
+    def begin(self, observation, *, commanded_joints=None):
         if self.spec is None or self.started:
             raise RuntimeError("Bind once and use a fresh preparation per session")
         actual = self.measured(observation)
+        origin = actual if commanded_joints is None else vector(commanded_joints, 8, 'last dispatched joints')
+        self.spec.validate(origin)
+        if max(abs(a-b) for a, b in zip(origin[:7], actual[:7])) > .15 or abs(origin[7]-actual[7]) > .20:
+            raise RuntimeError('Preparation handoff tracking error exceeded')
         # Already at the final posture? Skip the swing route, but still settle
         # and perform the final gripper action; never swing down again blindly.
         ready = self.waypoints[-1]["joints_rad"]
@@ -128,12 +132,12 @@ class FixedJointPreparation:
                 and max(abs(a-b) for a, b in zip(actual[:7], self.start_reference)) > self.start_tolerance):
             raise ValueError("Current pose is outside the declared preparation start region")
         self.index = len(self.waypoints)-1 if at_ready else 0
-        self.origin = self.last = actual
+        self.origin = self.last = origin
         self.started_at = observation.captured_at
         self.started = True
         self._segment()
-        return dict(initial_joints_rad=list(actual), skipped_to_ready=at_ready,
-                    metadata=self.metadata, planned_motion_s=self.planned_remaining(actual))
+        return dict(initial_joints_rad=list(actual), initial_command_rad=list(origin), skipped_to_ready=at_ready,
+                    metadata=self.metadata, planned_motion_s=self.planned_remaining(origin))
 
     def segment_ticks(self, start, goal):
         duration = self.period
@@ -213,3 +217,40 @@ class FixedJointPreparation:
         else:
             self.frame += 1
         return PreparationStep(command, waypoint, progress, completed, arrival)
+
+
+def reverse_preparation(preparation, options):
+    """Declared joint route, not a collision planner or reverse task playback.
+
+    Rejoin the last preparation arm pose, visit its joint waypoints backwards,
+    then reach the installation's explicit natural-hanging target. Never replay
+    gripper commands: hold the grip at entry throughout the return.
+    """
+    if not isinstance(preparation, FixedJointPreparation):
+        raise ValueError('Return home requires a fixed-joint preparation route')
+    allowed = {'kind', 'home_joints_rad', 'velocity_rad_s', 'acceleration_rad_s2',
+               'settle_tolerance_rad', 'settle_samples', 'settle_timeout_s', 'maximum_duration_s'}
+    if (not isinstance(options, dict) or set(options)-allowed
+            or options.get('kind') != 'reverse_preparation_v1'):
+        raise ValueError('Return home needs reverse_preparation_v1 configuration')
+    home = vector(options.get('home_joints_rad'), 7, 'natural-hanging joints')
+    waypoints = []
+    for item in reversed(preparation.waypoints):
+        if waypoints and waypoints[-1]['joints_rad'] == item['joints_rad']:
+            continue
+        waypoints.append(dict(name=f'return_{len(waypoints)}_{item["name"]}', joints_rad=item['joints_rad']))
+    waypoints.append(dict(name='natural_hanging', joints_rad=home))
+    overrides = {k: v for k, v in options.items() if k not in ('kind', 'home_joints_rad')}
+    settings = dict(velocity_rad_s=preparation.speed[0], acceleration_rad_s2=preparation.acceleration[0],
+                    gripper_velocity_rad_s=preparation.speed[7],
+                    gripper_acceleration_rad_s2=preparation.acceleration[7],
+                    settle_tolerance_rad=preparation.tolerance, settle_samples=preparation.stable_count,
+                    settle_timeout_s=preparation.settle_timeout, maximum_duration_s=preparation.maximum_duration)
+    settings.update(overrides)
+    result = FixedJointPreparation(preparation.side, waypoints, **settings,
+        provenance=dict(kind='reverse_preparation_v1', destination='configured_natural_hanging',
+                        gripper='hold_entry_dispatched_goal', collision_scope='declared_route_not_obstacle_planning'))
+    # Return must not silently run faster than the configured outward route.
+    if result.speed[0] > preparation.speed[0] or result.acceleration[0] > preparation.acceleration[0]:
+        raise ValueError('Return speed/acceleration cannot exceed preparation')
+    return result

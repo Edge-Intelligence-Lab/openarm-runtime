@@ -276,6 +276,8 @@ class Telemetry:
     link: dict = field(default_factory=dict)
     rx_classic: int = 0
     rx_fd: int = 0
+    connection_attempts: int = 0
+    retry_delay_s: float = 0.
 
     def snapshot(self):
         with self.lock:
@@ -290,6 +292,8 @@ class Telemetry:
                 "link": self.link,
                 "rx_classic": self.rx_classic,
                 "rx_fd": self.rx_fd,
+                "connection_attempts": self.connection_attempts,
+                "retry_delay_s": self.retry_delay_s,
             }
 
 
@@ -395,6 +399,9 @@ def poll_reconnecting(interface, shared, stop, *, frame_format="auto"):
     """
     delay = 1.0
     while not stop.is_set():
+        with shared.lock:
+            shared.connection_attempts += 1
+            shared.retry_delay_s = 0.
         before = shared.responses
         poll(interface, shared, stop, frame_format=frame_format)
         if stop.is_set():
@@ -403,6 +410,7 @@ def poll_reconnecting(interface, shared, stop, *, frame_format="auto"):
             delay = 1.0
         with shared.lock:
             shared.message = f"只读连接中断；{delay:g} 秒后重试（不重置总线）"
+            shared.retry_delay_s = delay
         if stop.wait(delay):
             return
         delay = min(delay * 2, 30.0)

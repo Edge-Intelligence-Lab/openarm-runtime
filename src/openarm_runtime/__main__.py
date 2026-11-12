@@ -57,12 +57,19 @@ def main():
     policy.add_argument("--policy", default="openarm_policy.adapters:HoldPolicy", help="Importable module:factory")
     policy.add_argument("--profile", type=Path, help="External sensor/session/policy JSON")
     policy.add_argument("--sides", nargs="+", choices=("left", "right"), default=["left", "right"])
-    policy.add_argument("--duration", type=float, default=10)
+    policy_time = policy.add_mutually_exclusive_group()
+    policy_time.add_argument("--duration", type=float, default=10)
+    policy_time.add_argument('--until-stopped', action='store_true',
+                             help='No episode time limit; operator stop or safety fault ends execution')
     policy.add_argument("--record", type=Path, help="New episode directory outside Git")
     policy.add_argument("--record-mode", choices=("summary", "full"), default="summary",
                         help="Compact result receipt by default; full explicitly saves observations/actions")
     policy.add_argument("--allow-nominal-geometry", action="store_true",
-                        help="Explicit operator trial with declared uncalibrated model geometry; not a calibration assertion")
+                         help="Explicit operator trial with declared uncalibrated model geometry; not a calibration assertion")
+    policy.add_argument('--home-only', action='store_true',
+                        help='Operator-started natural-hanging return; no model or cameras')
+    policy.add_argument('--auto-return-home', action='store_true',
+                        help='Use declared return route only after normal duration completion, never on stop/fault')
     model_serve = commands.add_parser("model-serve", help="Serve an optional model on loopback; never opens robot devices")
     model_serve.add_argument("--profile", type=Path, required=True, help="Predictor factory/kwargs JSON")
     model_serve.add_argument("--port", type=int, default=8765)
