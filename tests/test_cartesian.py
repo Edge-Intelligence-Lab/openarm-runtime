@@ -99,6 +99,56 @@ class CartesianTests(unittest.TestCase):
         for q, dt in (([0]*7, .1), ([0]*7, 0), ([float('nan')]*7, .01), ([2]*7, .01)):
             with self.assertRaises(ValueError): solver.step(q, self.np.eye(4), dt)
 
+    def test_soft_boundary_holds_repeated_outward_goals_without_disabling(self):
+        from openarm_runtime.cartesian import DifferentialIK
+        margin = .02
+        solver = DifferentialIK(self.chain, lower=[-.2]*7, upper=[.2]*7,
+                                velocity=[.5]*7, posture=[.18]*7, command_margin_rad=margin)
+        q = self.np.full(7, .18)
+        target = self.chain.forward([.7]*7)
+        for _ in range(100):
+            result = solver.step(q, target, .05)
+            next_q = self.np.asarray(result['joints'])
+            self.assertTrue((next_q <= .18 + 1e-9).all())
+            self.assertTrue((next_q >= -.18 - 1e-9).all())
+            self.assertLessEqual(abs(next_q-q).max(), .02500001)
+            q = next_q
+        self.assertTrue(self.np.isfinite(q).all())
+        self.assertTrue(result['boundary_joints'])
+        with self.assertRaisesRegex(ValueError, 'outside physical limits'):
+            solver.step([.201]*7, target, .05)
+
+    def test_start_in_soft_margin_allows_only_hold_or_inward_without_jump(self):
+        from openarm_runtime.cartesian import DifferentialIK
+        solver = DifferentialIK(self.chain, lower=[-.2]*7, upper=[.2]*7,
+                                velocity=[.5]*7, posture=[.195]*7, command_margin_rad=.02)
+        q = self.np.full(7, .195)
+        target = self.chain.forward([.7]*7)
+        for _ in range(15):
+            next_q = self.np.asarray(solver.step(q, target, .05)['joints'])
+            self.assertTrue((next_q <= self.np.maximum(q, .18) + 1e-9).all())
+            self.assertLessEqual(abs(next_q-q).max(), .02500001)
+            q = next_q
+
+    def test_command_margin_validation(self):
+        from openarm_runtime.cartesian import DifferentialIK
+        for margin in (-.01, .2, float('nan'), True):
+            with self.assertRaises(ValueError):
+                DifferentialIK(self.chain, lower=[-.2]*7, upper=[.2]*7,
+                               velocity=[.5]*7, posture=[0]*7, command_margin_rad=margin)
+
+    def test_soft_boundary_respects_negative_encoder_signs_and_offsets(self):
+        from openarm_runtime.cartesian import DifferentialIK, KinematicChain
+        chain = KinematicChain(self.path, **dict(self.kwargs, signs=[-1]*7, offsets=[.2]*7))
+        solver = DifferentialIK(chain, lower=[-.2]*7, upper=[.2]*7,
+                                velocity=[.5]*7, posture=[.18]*7, command_margin_rad=.02)
+        q = self.np.full(7, .18)
+        for _ in range(20):
+            next_q = self.np.asarray(solver.step(q, chain.forward([.7]*7), .05)['joints'])
+            self.assertTrue((abs(next_q) <= .18 + 1e-9).all())
+            self.assertLessEqual(abs(next_q-q).max(), .02500001)
+            q = next_q
+
     def test_encoder_order_sign_offsets_and_tcp(self):
         from openarm_runtime.cartesian import KinematicChain
         tcp = self.np.eye(4); tcp[2, 3] = .07

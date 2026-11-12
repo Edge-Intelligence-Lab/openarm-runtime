@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Align shared arm J1–J7 motor-coordinate intervals with the official OpenArm 2.0
+  URDF; retain existing gripper bounds/calibration. This also changes the allowed
+  domain of teleoperation and preparation, not just the web policy workspace.
+- Reserve one degree inside arm IK bounds by default for Cartesian policy;
+  continue bounded hold/inward motion at the soft boundary rather than treating
+  a saturated goal as an error. Keep genuine hard-feedback violations, tracking,
+  deadlines, watchdogs and disable cleanup blocking. Report the offending joint
+  and exact feedback interval on a hard-limit error. See
+  [joint-boundary behavior and limitations](docs/joint-boundary.md).
+
 ## 0.9.0 — 2026-11-11
 
 - Integrate registered model loading, sample prediction, explicit policy execution

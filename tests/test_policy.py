@@ -43,6 +43,28 @@ class SlowResetPolicy(HoldPolicy):
 
 
 class PolicyTests(unittest.TestCase):
+    def test_official_v2_joint_intervals_keep_side_conventions_and_gripper_bounds(self):
+        from openarm_runtime.joints import JOINT_LIMITS
+        from openarm_policy.robots import joint_spec
+        expected = {
+            'left': ((-200,80),(-190,10),(-90,90),(0,140),(-90,90),(-45,45),(-90,90),(0,65)),
+            'right': ((-80,200),(-10,190),(-90,90),(0,140),(-90,90),(-45,45),(-90,90),(-65,0)),
+        }
+        for side, intervals in expected.items():
+            self.assertEqual(JOINT_LIMITS[side], intervals)
+            spec = joint_spec((side,))
+            for index, (lower, upper) in enumerate(intervals):
+                self.assertAlmostEqual(spec.lower[index], math.radians(lower))
+                self.assertAlmostEqual(spec.upper[index], math.radians(upper))
+                for boundary in (lower, upper):
+                    values = [0.]*8
+                    values[index] = math.radians(boundary)
+                    spec.validate(tuple(values))
+                for outside in (lower-.001, upper+.001):
+                    values = [0.]*8
+                    values[index] = math.radians(outside)
+                    with self.assertRaises(ValueError): spec.validate(tuple(values))
+
     def test_time_anchored_chunk_skips_expired_prefix(self):
         spec = ActionSpec(("a",), (-1,), (1,))
         obs = Observation(7, 100, {})

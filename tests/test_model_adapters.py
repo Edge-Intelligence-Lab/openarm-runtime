@@ -344,6 +344,8 @@ class CartesianDispatchTests(unittest.TestCase):
         self.assertFalse(self.plant.started)
         self.robot.start()
         snapshot = self.robot.snapshot()
+        import math
+        self.assertAlmostEqual(self.robot.joint_margin, math.radians(1))
         self.assertIn("tcp/left", snapshot)
         target = (0., 0., 0., 0., 0., 0., 1., .04)
         self.robot.submit(target, time.monotonic()+1)
@@ -363,6 +365,30 @@ class CartesianDispatchTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): self.robot.submit(target, time.monotonic()+1)
         self.assertFalse(self.plant.commands)
         self.robot.close()
+
+    def test_joint_command_margin_reaches_both_solvers_and_preserves_hard_feedback_guard(self):
+        from openarm_policy.cartesian import CartesianRobot
+        robot = CartesianRobot(self.plant, dict(self.config, joint_command_margin_rad=.02))
+        events = []
+        robot.record = events.append
+        with patch('openarm_runtime.cartesian.DifferentialIK', return_value=self.solver) as constructor:
+            robot.start()
+            self.assertEqual(constructor.call_args.kwargs['command_margin_rad'], .02)
+            robot.begin_preparation()
+            robot.finish_preparation()
+            self.assertEqual(constructor.call_args.kwargs['command_margin_rad'], .02)
+        samples = self.plant.snapshot()
+        sample = samples['robot/left']
+        state = self.np.asarray(sample.data).copy()
+        state[2, 0] = self.plant.spec.upper[2] + .001
+        samples['robot/left'] = replace(sample, data=state)
+        with self.assertRaisesRegex(ValueError, 'Measured .* outside joint safety range'):
+            robot._feedback(samples)
+        self.assertEqual(events[-1]['event'], 'joint_feedback_out_of_range')
+        self.assertEqual(events[-1]['joint'], self.plant.spec.names[2])
+        self.assertEqual(events[-1]['measured_rad'], state[2, 0])
+        self.assertFalse(self.plant.commands)
+        robot.close()
 
     def test_progress_holds_reference_and_anchors_inference_to_realized_fk(self):
         from openarm_policy.cartesian import CartesianRobot

@@ -4,6 +4,7 @@ Models submit absolute task-frame TCP goals; IK runs locally at every submit,
 not once per predicted chunk. Underlying CAN workers still own their watchdogs,
 gains, bus leases and disable cleanup. No device is opened by construction.
 """
+import math
 import time
 
 from .contracts import ActionSpec, SensorSample, StreamSpec, TCP_POSE, finite
@@ -50,7 +51,8 @@ class CartesianRobot:
         from openarm_runtime.cartesian import KinematicChain, pose
         allowed = {"side", "calibration_verified", "chain", "task_from_base", "workspace_m",
                    "gripper", "velocity_rad_s", "gripper_velocity_rad_s", "tracking_limit_rad",
-                      "feedback_max_age_s", "calibration_status", "progress", "preparation_velocity_rad_s"}
+                       "feedback_max_age_s", "calibration_status", "progress", "preparation_velocity_rad_s",
+                       "joint_command_margin_rad"}
         verified = config.get("calibration_verified") is True
         nominal = (config.get("calibration_verified") is False
                    and config.get("calibration_status") == "nominal_model_not_hardware_calibrated")
@@ -82,6 +84,9 @@ class CartesianRobot:
         self.grip_speed = config.get("gripper_velocity_rad_s", .5)
         self.tracking = config.get("tracking_limit_rad", .15)
         self.max_age = config.get("feedback_max_age_s", .15)
+        self.joint_margin = config.get("joint_command_margin_rad", math.radians(1))
+        if not finite(self.joint_margin) or not 0 <= self.joint_margin <= math.radians(5):
+            raise ValueError("Joint command margin must be within 0..5 degrees")
         if (any(not finite(v) or v <= 0 for v in (self.speed, self.preparation_speed, self.grip_speed, self.tracking, self.max_age))
                 or self.speed > .5 or self.preparation_speed > .5 or self.grip_speed > .5 or self.tracking > .3 or self.max_age > .4):
             raise ValueError("Invalid Cartesian execution limits")
@@ -169,7 +174,8 @@ class CartesianRobot:
         # Re-anchor the soft posture task at ready, not the hanging start. Keep
         # the last dispatched configuration/goal to avoid an implicit pose jump.
         self.solver = DifferentialIK(self.chain, lower=self.robot.spec.lower[:7],
-            upper=self.robot.spec.upper[:7], velocity=[self.speed]*7, posture=self.reference[:7])
+            upper=self.robot.spec.upper[:7], velocity=[self.speed]*7, posture=self.reference[:7],
+            command_margin_rad=self.joint_margin)
         self.target = self._tcp(self.reference)
         self.preparing = False
         return tuple(float(v) for v in self.target)
@@ -184,6 +190,16 @@ class CartesianRobot:
         if state.shape != (8, 3) or not np.isfinite(state).all():
             raise ValueError("Invalid Cartesian robot feedback")
         measured = state[:, 0]
+        lower, upper = np.asarray(self.robot.spec.lower), np.asarray(self.robot.spec.upper)
+        outside = np.flatnonzero((measured < lower) | (measured > upper))
+        if len(outside):
+            i = int(outside[0])
+            self.record({"event": "joint_feedback_out_of_range", "time": time.monotonic(),
+                         "joint": self.robot.spec.names[i], "measured_rad": float(measured[i]),
+                         "lower_rad": float(lower[i]), "upper_rad": float(upper[i]),
+                         "all_positions_rad": measured.tolist()})
+            raise ValueError(f"Measured {self.robot.spec.names[i]}={measured[i]:.8g} rad outside "
+                             f"joint safety range [{lower[i]:.8g}, {upper[i]:.8g}] rad")
         self.robot.spec.validate(tuple(float(v) for v in measured))
         return sample, measured
 
@@ -205,9 +221,13 @@ class CartesianRobot:
             self.target = self._tcp(measured)
             self.spec.validate(tuple(float(v) for v in self.target))
             self.solver = DifferentialIK(self.chain, lower=self.robot.spec.lower[:7],
-                upper=self.robot.spec.upper[:7], velocity=[self.speed]*7, posture=measured[:7])
+                upper=self.robot.spec.upper[:7], velocity=[self.speed]*7, posture=measured[:7],
+                command_margin_rad=self.joint_margin)
             self.record({"event": "cartesian_context", "time": time.monotonic(),
-                         "calibration": self.config, "model": self.chain.metadata})
+                         "calibration": self.config, "model": self.chain.metadata,
+                         "joint_command_margin_rad": self.joint_margin,
+                         "joint_hard_lower_rad": list(self.robot.spec.lower[:7]),
+                         "joint_hard_upper_rad": list(self.robot.spec.upper[:7])})
         except BaseException:
             self.robot.close()
             raise

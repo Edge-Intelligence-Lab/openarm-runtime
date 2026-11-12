@@ -127,7 +127,7 @@ class DifferentialIK:
     Barrier objects provide an extension seam, not validated obstacle avoidance.
     Any exception/nonfinite/limit violation rejects the step; never random restart.
     """
-    def __init__(self, chain, *, lower, upper, velocity, posture, barriers=()):
+    def __init__(self, chain, *, lower, upper, velocity, posture, barriers=(), command_margin_rad=0.):
         import numpy as np
         import pink
         from pink.tasks import FrameTask, PostureTask
@@ -147,6 +147,17 @@ class DifferentialIK:
         self.model.upperPositionLimit[idx] = np.minimum(self.model.upperPositionLimit[idx], np.maximum(a, b))
         if (self.model.lowerPositionLimit >= self.model.upperPositionLimit).any():
             raise ValueError("Physical and model limits do not intersect")
+        margin = vector([command_margin_rad], 1, "command margin")[0]
+        if not 0 <= margin <= math.radians(5):
+            raise ValueError("Command margin must be within 0..5 degrees")
+        self.hard_lower = self.model.lowerPositionLimit.copy()
+        self.hard_upper = self.model.upperPositionLimit.copy()
+        self.soft_lower = self.hard_lower.copy()
+        self.soft_upper = self.hard_upper.copy()
+        self.soft_lower[idx] += margin
+        self.soft_upper[idx] -= margin
+        if (self.soft_lower >= self.soft_upper).any():
+            raise ValueError("Command margin consumes the joint interval")
         self.model.velocityLimit[idx] = self.velocity
         self.configuration = pink.Configuration(self.model, self.model.createData(), chain.configuration(posture))
         self.configuration.check_limits()
@@ -168,6 +179,12 @@ class DifferentialIK:
             raise ValueError(f"IK seed J{bad+1}={measured[bad]:.12g}rad outside physical limits "
                              f"[{self.lower[bad]:.12g}, {self.upper[bad]:.12g}]")
         self.configuration.update(self.chain.configuration(measured))
+        # Reserve tracking room inside the unchanged hard limits. If the initial
+        # pose is already in that margin, allow hold/inward motion only: never
+        # clip measured feedback or jump the command to the inner interval.
+        current = self.configuration.q
+        self.model.lowerPositionLimit[:] = np.maximum(self.hard_lower, np.minimum(self.soft_lower, current))
+        self.model.upperPositionLimit[:] = np.minimum(self.hard_upper, np.maximum(self.soft_upper, current))
         desired = pin.SE3(pose(target))
         self.task.set_target(desired * self.chain.tcp.inverse())
         started = time.perf_counter()
@@ -189,6 +206,9 @@ class DifferentialIK:
         actual = pin.SE3(self.chain.forward(command))
         residual = pin.log6(actual.inverse() * desired).vector
         return dict(joints=command.tolist(), position_error_m=float(np.linalg.norm(actual.translation - desired.translation)),
-                    orientation_error_rad=float(np.linalg.norm(residual[3:])),
+                     orientation_error_rad=float(np.linalg.norm(residual[3:])),
+                    boundary_joints=(np.flatnonzero(
+                        (q[self.chain.indices] <= self.soft_lower[self.chain.indices] + 1e-6)
+                        | (q[self.chain.indices] >= self.soft_upper[self.chain.indices] - 1e-6)) + 1).tolist(),
                     solve_s=time.perf_counter() - started,
                     status="local_step_not_reachability_certificate")

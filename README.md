@@ -57,6 +57,8 @@ openarm-runtime policy --robot simulate --duration 3
 ```
 
 See [policy contracts, adapters, recording and physical execution](docs/policy.md).
+See [official arm limits, soft-boundary holding and hard feedback guards](docs/joint-boundary.md)
+for the shared joint-range change and Cartesian policy's command reserve.
 For reusable checkpoint/input/output plugins and the initial pure-visual ACT
 upright integration, see [model adapters and deployment](docs/model-adapters.md).
 Cartesian policy execution is an explicit geometry-declared capability, not joint-vector

@@ -236,9 +236,20 @@ class TeleoperationTests(unittest.TestCase):
         offsets = relative_offsets(self.mapping, "right", self.sample(), self.sample([3000] * 8))
         self.assertGreater(abs(offsets[1]), 30)
         targets = follower_targets("right", dict.fromkeys(range(1, 9), 0), offsets)
-        self.assertAlmostEqual(math.degrees(targets[1]), -75)
-        self.assertAlmostEqual(math.degrees(targets[2]), -9)
+        self.assertAlmostEqual(math.degrees(targets[1]), -80)
+        self.assertAlmostEqual(math.degrees(targets[2]), -10)
         self.assertAlmostEqual(math.degrees(targets[4]), 0)
+
+    def test_follower_holds_each_official_boundary_for_repeated_outward_offsets(self):
+        from openarm_runtime.joints import JOINT_LIMITS
+        for side in ('left', 'right'):
+            base = dict.fromkeys(range(1, 9), 0.)
+            for direction in (-1, 1):
+                offsets = dict.fromkeys(range(1, 9), direction*1000.)
+                first = follower_targets(side, base, offsets)
+                for mid, interval in enumerate(JOINT_LIMITS[side], 1):
+                    self.assertAlmostEqual(math.degrees(first[mid]), interval[0 if direction < 0 else 1])
+                self.assertEqual(follower_targets(side, first, offsets), first)
 
     def test_stale_and_combined_alarm_stop_physical_control(self):
         for sample in (self.sample(timestamp=0), self.sample(errors=(3,) * 8)):
