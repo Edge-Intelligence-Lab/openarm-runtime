@@ -28,9 +28,14 @@ def run(args):
         raise ValueError('Calibrated zero uses both arms and no model/return profile')
     data = json.loads(args.profile.read_text()) if args.profile else {}
     root = args.profile.resolve().parent if args.profile else Path.cwd()
-    unknown = set(data) - {"session", "policy_kwargs", "task", "video_profile", "video_http", "tactile", "cartesian", "preparation", "preparation_profile", "integral", "rerun_recording", "return_home"}
+    unknown = set(data) - {"session", "policy_kwargs", "task", "video_profile", "video_http", "tactile", "tactile_profile", "tactile_recording", "cartesian", "preparation", "preparation_profile", "integral", "rerun_recording", "return_home"}
     if unknown:
         raise ValueError(f"Unknown policy profile keys: {sorted(unknown)}")
+    if data.get('tactile_profile') is not None:
+        if data.get('tactile') is not None:
+            raise ValueError('Choose tactile or tactile_profile, not both')
+        from openarm_tactile.profile import load
+        data['tactile'] = load(root / data['tactile_profile'])['tactile']
     if data.get("video_http") and data.get("video_profile"):
         raise ValueError("Choose camera ownership or borrowed video_http, not both")
     if args.robot == "simulate" and data.get("video_http") and not getattr(args, 'home_only', False):
@@ -41,6 +46,11 @@ def run(args):
     if data.get("preparation_profile") is not None:
         preparation_options = json.loads((root / data["preparation_profile"]).read_text())
     home_only = getattr(args, 'home_only', False) or calibrated_zero
+    if type(data.get('tactile_recording', False)) is not bool:
+        raise ValueError('tactile_recording must be boolean')
+    sidecar = data.get('tactile_recording', False) and not home_only
+    if sidecar and (not args.record or not data.get('tactile')):
+        raise ValueError('Tactile recording requires sensors and an episode directory')
     auto_return = getattr(args, 'auto_return_home', False)
     until_stopped = getattr(args, 'until_stopped', False)
     if until_stopped and auto_return:
@@ -115,10 +125,32 @@ def run(args):
             from openarm_tactile import TactileReader
             readers = {}
             for name, options in data["tactile"].items():
+                options = {k: v for k, v in options.items() if k != 'identity'}
                 if args.robot == "simulate":
                     options = {"simulate": True}
-                readers[name] = stack.enter_context(TactileReader(**options))
-            sources.append(TactileObservation(readers))
+                readers[name] = TactileReader(**options)
+            if sidecar:
+                from .recording import record_tactile
+                tactile_episode = stack.enter_context(record_tactile(args.record, readers, data['tactile'], recorder))
+            for reader in readers.values():
+                stack.enter_context(reader)
+            if sidecar:
+                # Startup-only acquisition check before robot.start(). Once running,
+                # this native-rate journal does not enter the model/control streams.
+                import time
+                deadline = time.monotonic() + config.source_timeout_s
+                while True:
+                    states = [r.snapshot() for r in readers.values()]
+                    if tactile_episode.error:
+                        raise RuntimeError('Tactile sidecar writer failed; robot was not started')
+                    if (all(s['state'] == 'live' for s in states)
+                            and all('tactile/'+name in tactile_episode.stats for name in readers)):
+                        break
+                    if any(s['error'] for s in states) or time.monotonic() >= deadline:
+                        raise RuntimeError('Tactile sidecar not ready; robot was not started')
+                    time.sleep(.02)
+            else:
+                sources.append(TactileObservation(readers))
         session = PolicySession(robot, None if home_only else ImportedPolicy(args.policy, data.get("policy_kwargs")),
                                  sources=sources, config=config, task=data.get("task", ""), recorder=recorder,
                                  preparation=None if home_only else preparation, return_home=return_home,

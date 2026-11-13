@@ -1,10 +1,66 @@
 """Explicit episode storage with array sidecars; no pickle or hidden disk writes."""
 from dataclasses import is_dataclass
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import threading
 
 from .contracts import Observation, SensorSample
+
+
+@contextmanager
+def record_tactile(directory, readers, options, recorder=None):
+    """Native-rate sidecar using the existing collection journal, not the model.
+
+    Reader callbacks enqueue small immutable frames off the control thread.
+    Capture faults mark the sidecar incomplete; they never become fake zeros or
+    commands. Readers must be closed before this context is exited.
+    """
+    from openarm_collection.recording import Episode, atomic_json
+    from openarm_tactile import SENSOR
+    root = Path(directory)
+    streams = {}
+    for name, reader in readers.items():
+        identity = options[name].get('identity')
+        if (not isinstance(identity, dict) or not identity.get('serial') or not identity.get('mount')):
+            raise ValueError('Tactile recording needs serial and explicit mount identity')
+        if reader.on_sample is not None:
+            raise ValueError('Tactile reader already has a recording sink')
+        streams['tactile/'+name] = dict(encoding='xyz_counts', shape=[69, 3], units='counts',
+            required=True, max_age_s=.5, sensor=SENSOR, identity=identity,
+            device=reader.device, device_id=reader.device_id, baudrate=reader.baudrate,
+            simulated=reader.simulate,
+            timestamp_semantics='host_received_after_two_separate_transactions',
+            layout='resultant_xyz_then_68_taxel_xyz', baseline='raw_device_output_no_runtime_zero',
+            calibration='absolute_force_and_physical_pad_axes_unverified')
+    episode = Episode(root/'tactile', dict(policy_episode=root.parent.name,
+        purpose='policy_sidecar_not_model_input', hardware_synchronized=False), streams)
+    pointer = root/'tactile.json'
+    receipt = dict(schema='openarm.policy-tactile.v1', path=str(episode.path.relative_to(root)),
+                   complete=False, model_input=False, clock='host_monotonic_seconds')
+    try:
+        atomic_json(pointer, receipt)
+        for name, reader in readers.items():
+            def receive(sample, sequence, timestamp, key='tactile/'+name):
+                episode.submit(key, sequence, timestamp, (sample.resultant, *sample.forces))
+            reader.on_sample = receive
+        if recorder is not None:
+            recorder.record(dict(event='tactile_recording_started', **receipt))
+        yield episode
+    finally:
+        status = {}
+        for name, reader in readers.items():
+            reader.on_sample = None
+            snapshot = reader.snapshot()
+            status[name] = {k: snapshot[k] for k in ('state', 'error', 'sequence', 'received_at', 'age_s', 'rate_hz')}
+            if snapshot['error']:
+                episode.fail(name+': '+snapshot['error'])
+        episode.finish('policy_session_end')
+        receipt.update(complete=episode.manifest['state'] == 'review',
+                       quality=episode.manifest['quality'], reader_status=status)
+        atomic_json(pointer, receipt)
+        if recorder is not None:
+            recorder.record(dict(event='tactile_recording_finished', **receipt))
 
 
 class CompactEpisodeRecorder:

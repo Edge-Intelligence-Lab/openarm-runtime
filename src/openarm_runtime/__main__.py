@@ -48,6 +48,7 @@ def main():
     source = tactile.add_mutually_exclusive_group(required=True)
     source.add_argument("--device", help="USB serial converter path")
     source.add_argument("--simulate", action="store_true")
+    source.add_argument("--profile", type=Path, help="External multi-sensor tactile configuration")
     tactile.add_argument("--right-device", help="Second serial converter; show both sensors side by side")
     tactile.add_argument("--port", type=int, default=8891)
     tactile.add_argument("--baudrate", type=int, default=921600)
@@ -160,7 +161,11 @@ def main():
             parser.error("Port must be 1024..65535 and baudrate must be positive")
         if not 1 <= args.device_id <= 255:
             parser.error("Device ID must be 1..255")
-        if args.right_device:
+        if args.profile:
+            if args.right_device or args.port > 65522:
+                parser.error('--profile requires no --right-device and port <= 65522')
+            from openarm_tactile.workspace import serve as serve_tactile
+        elif args.right_device:
             if args.simulate or args.port > 65524:
                 parser.error("--right-device requires --device and port <= 65524")
             if Path(args.device).resolve() == Path(args.right_device).resolve():
@@ -174,9 +179,12 @@ def main():
 
         previous = signal.signal(signal.SIGTERM, shutdown_tactile)
         try:
-            serve_tactile(args.device, simulate=args.simulate, port=args.port,
-                          baudrate=args.baudrate, device_id=args.device_id,
-                          **({"right_device": args.right_device} if args.right_device else {}))
+            if args.profile:
+                serve_tactile(args.profile, port=args.port)
+            else:
+                serve_tactile(args.device, simulate=args.simulate, port=args.port,
+                              baudrate=args.baudrate, device_id=args.device_id,
+                              **({"right_device": args.right_device} if args.right_device else {}))
         except KeyboardInterrupt:
             pass
         finally:

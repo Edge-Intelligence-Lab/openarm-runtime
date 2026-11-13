@@ -140,6 +140,27 @@
 
 ## 接入其他模型
 
+### 只记录触觉，不作为模型输入
+
+在安装机的 policy profile 中配置已有 `tactile` 设备映射，并显式设置
+`"tactile_recording": true`。每个设备需有 `identity.serial` 和 `identity.mount`；
+物理指垫尚未核对时应明确写 unverified，不能凭串口编号猜左右。
+保留模型原有 observation encoder；无需给 ACT 增加触觉特征。
+
+每次执行目录的 `episode/tactile.json` 指向同目录下的 `tactile/<id>/`：
+`samples.jsonl` 按传感器原始采样率保存序号、主机接收时间、合力三轴与68测点三轴，
+`manifest.json` 保存设备身份、原始 counts 单位和丢帧/连续性检查。
+复用已有异步采集写入器，不复制相机数据，也不把高频触觉挤入 Rerun 图像队列。
+summary 模式也会保留这份显式请求的旁路数据；未启用时保持原有最小记录策略。
+
+启用后先检查触觉可读，再允许进入机器人启动；运行期间触觉不进入模型或控制数据流。
+传感器中断或写入溢出会把触觉记录标为 incomplete，不补零，不声称数据完整，
+也不因触觉丢失而新增一条运动控制规则。归位操作不打开触觉设备。
+时间使用共同的 host monotonic 时钟，不声称硬件同步；合力与分布来自两次串口事务。
+没有绝对力标定时 counts 不能当作 N，正常通信也不代表已验证受压响应。
+
+### 模型接口
+
 发布的 upright foundation 模型使用
 `openarm_policy.models.foundation:FoundationObservation` 和 `FoundationActions`，
 而不是历史模型的图像/动作配置。编码器显式读取模型图像契约与 HF 头部/腕部内参，

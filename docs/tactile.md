@@ -160,3 +160,22 @@ Mac 浏览器通过 SSH 使用双路页面时，在 Mac 终端保持以下连接
 ```sh
 ssh -N -L 8891:127.0.0.1:8891 -L 8901:127.0.0.1:8901 -L 8902:127.0.0.1:8902 USER@WORKSTATION
 ```
+## 四路网页与位置保存
+
+`openarm-runtime tactile --profile /path/to/tactile.json --port 8891`
+复用单传感器视图显示配置中的多路传感器。外部 JSON 使用
+`{"tactile": {"pad_serial": {"device": "/dev/serial/by-id/...", "device_id": 2,
+"baudrate": 921600, "identity": {"serial": "...", "mount": "physical_pad_assignment_unverified"}}}}`。
+
+网页为每个序列号提供未配置、左手左爪/右爪、右手左爪/右爪选项。
+左右爪统一以从该手的手腕朝指尖看为准，不随操作者站位改变。
+配置键保持兼容：`left_pad_1`/`left_pad_2` 分别为左手左爪/右爪，
+`right_pad_1`/`right_pad_2` 分别为右手左爪/右爪。
+保存时校验位置不能重复，并原子写回这份机器配置，不依赖浏览器存储。
+策略 profile 使用 `"tactile_profile": "/path/to/tactile.json"` 替代内联 `tactile`，
+每次新执行读取最新映射；已保存的历史记录不会重标注。配合 `tactile_recording: true`
+将位置元数据随原始数据一起保存，不改变模型输入。
+
+网页预览独占传感器串口。试跑前点击“暂停预览并释放串口”，或停止触觉服务；
+关闭浏览器标签本身不等于停止采集。网页只读传感器，不启用电机。
+平台代理需将四个视图端口（主端口+10至+13）列在 `extra_ports`。
