@@ -20,6 +20,15 @@ class ProgressTests(unittest.TestCase):
             with self.assertRaises(ValueError):CartesianProgress(**kwargs)
         with self.assertRaises(ValueError):CartesianProgress().advance([0]*7, [0]*6+[math.nan], 0)
 
+    def test_timeout_names_limiting_axis_without_changing_resume_boundary(self):
+        p = CartesianProgress()
+        self.assertFalse(p.advance([0.]*6+[.08], [0.]*7, 10.))
+        with self.assertRaisesRegex(TimeoutError,
+                r'Cartesian progress failed to settle: J7 error=0.042000 rad, resume<=0.040000 rad'):
+            p.advance([0.]*6+[.042], [0.]*7, 20.1)
+        self.assertEqual(p.resume_error, .04)
+        self.assertEqual(p.timeout, 10.)
+
     def test_target_bounds_and_quaternion_sign_equivalence(self):
         try:
             import numpy as np

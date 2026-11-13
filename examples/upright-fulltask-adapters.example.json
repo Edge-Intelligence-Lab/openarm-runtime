@@ -1,0 +1,29 @@
+{
+  "predictor": {
+    "factory": "openarm_policy.models.act:TacPilotACT",
+    "kwargs": {
+      "checkpoint": "/ABSOLUTE/EXTERNAL/colleague-upright-step45000",
+      "device": "cpu",
+      "state_contract": {
+        "schema": "tacpilot.tcp-state8.v1",
+        "quaternion_to_rotvec": "acos_preserve_sign",
+        "observation_adapter": null
+      }
+    }
+  },
+  "observation": {
+    "factory": "openarm_policy.models.foundation:FoundationObservation",
+    "kwargs": {
+      "overview": "camera/head",
+      "wrist": "camera/left",
+      "image_contract": "/ABSOLUTE/EXTERNAL/colleague-upright-step45000/image-contract.json",
+      "head_calibration": "/ABSOLUTE/EXTERNAL/head-calibration.json",
+      "wrist_calibration": "/ABSOLUTE/EXTERNAL/wrist-calibration.json",
+      "state_contract": {
+        "schema": "tacpilot.tcp-state8.v1",
+        "quaternion_to_rotvec": "acos_preserve_sign",
+        "observation_adapter": null
+      }
+    }
+  }
+}

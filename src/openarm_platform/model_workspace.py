@@ -186,6 +186,7 @@ class ModelWorkspace:
         self.phase = ''
         self.home_completed = False
         self.error = ''
+        self.execution_error = ''
         self.stop_reason = ''
         self.video_preview_port = None
         self.test_result = self.fingerprint = None
@@ -512,6 +513,7 @@ class ModelWorkspace:
                             stdout=log, stderr=subprocess.STDOUT, start_new_session=os.name == 'posix')
                     self.process, self.run_root = process, root
                     self.token, self.execution, self.error = token, 'running', ''
+                    self.execution_error = ''
                     self.operation_kind = 'home' if home_only else 'policy'
                     self.phase = 'return_home' if home_only else 'preparation'
                     self.home_completed = False
@@ -583,6 +585,9 @@ class ModelWorkspace:
             reason = termination.get('error') if isinstance(termination, dict) else None
             if isinstance(reason, str) and reason.strip():
                 self.error += f'。原始错误：{reason}'
+        # Model load/unload checks own self.error; they must not erase the last
+        # physical-session failure or its unverified-cleanup warning.
+        self.execution_error = self.error if self.execution in ('failed', 'stopped_error') else ''
         self.process, self.owner = None, None
 
     def stop(self, *, owner=None):
@@ -648,7 +653,9 @@ class ModelWorkspace:
                     blockers.append(str(exc))
             return dict(models=[e.public() for e in self.entries.values()], state=self.state,
                 execution=self.execution, selected=self.entry.id if self.entry else None,
-                error=self.error, sample_test=self.test_result, blockers=blockers,
+                error='。'.join(dict.fromkeys(filter(None, (self.execution_error, self.error)))),
+                execution_error=self.execution_error,
+                sample_test=self.test_result, blockers=blockers,
                 stop_reason=self.stop_reason,
                 phase=self.phase, operation=self.operation_kind, home_completed=self.home_completed,
                 connection=self.connectivity.snapshot(),

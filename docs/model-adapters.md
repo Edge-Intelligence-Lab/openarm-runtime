@@ -33,6 +33,53 @@ and output adapters. It does not change CAN, the scheduler, teleoperation or oth
 models. No extension is claimed to support arbitrary models without adapters.
 The existing `ImportedPolicy` and `ChunkPolicyAdapter` APIs remain supported.
 
+### Bind state rules to each model
+
+Do not replace weights while borrowing another model's pose adapter. Use one
+implementation and per-model configuration. For full-task original ACT step45000,
+put the same `state_contract` in the **predictor kwargs** (`TacPilotACT`, including
+when served over HTTP) and **observation kwargs** (`UprightObservation` or
+`FoundationObservation`):
+
+```json
+{
+  "state_contract": {
+    "schema": "tacpilot.tcp-state8.v1",
+    "quaternion_to_rotvec": "acos_preserve_sign",
+    "observation_adapter": null
+  }
+}
+```
+
+This means world xyz in metres, training `geometry.pose_state` float32 XYZW →
+absolute rotvec (preserve quaternion sign), and two positive half-apertures in
+metres. It forbids a leftover fixed-relative/rotation6d checkpoint adapter.
+The encoder does **not** apply `observation_adapter`; that field declares the
+checkpoint transform expected inside the predictor. Full-task ACT expects none.
+Keep its complete checkpoint/config/processors together; do not delete files from
+an old model to make a new profile pass. Keep the existing image/action contracts,
+20 Hz / execute25 schedule, preparation and all robot protections separate.
+
+`examples/upright-fulltask-adapters.example.json` contains the two configuration
+fragments, not another executable or a complete robot profile. Its `predictor`
+object is the model-service profile (or a direct `policy_kwargs.model`); its
+`observation` object goes in `policy_kwargs.observation`. Fill paths externally
+and reuse the existing calibrated action decoder and robot profile. Do not pass
+the whole fragment file to `model-serve` or change old models' profiles globally.
+
+`ModelPolicy` rejects missing or unequal state contracts when either component
+declares one, including through HTTP metadata. `TacPilotACT` rejects a mismatched
+checkpoint pose adapter before constructing the network. Legacy profiles without
+this field keep their previous behavior; an explicitly bound legacy model can use
+`scipy_shortest` and its exact checkpoint `observation_adapter` object. Existing
+image/action checks still apply. Another action format uses the existing decoder
+plugin boundary, not a second robot loop.
+
+This is not automatic quaternion-sign calibration. The physical TCP source must
+use the same XYZW/sign convention as the training observations; do not flip or
+smooth signs heuristically. First compare saved inputs/outputs with the model's
+reference samples offline. A passing adapter check does not qualify hardware.
+
 ## Initial built-ins
 
 - `models.act:TacPilotACT`: strict local full-policy load for the released
@@ -83,6 +130,26 @@ task-from-base transform and a monotonic measured gripper lookup table. Task-spa
 and commanded-FK workspace bounds, deadlines and following error are checked before
 dispatch. This is **not** tabletop/self-collision avoidance or a force controller.
 The original gains, bus leases, worker watchdogs and verified disable are unchanged.
+
+During policy execution, if another **closing** step would exceed the existing
+0.20 rad gripper lead bound, the wrapper holds the previous gripper reference
+only if that reference is still within the bound. Arm IK continues normally;
+new opening goals remain subject to the original speed and safety checks. The
+dispatch receipt marks this with `gripper_closure_limited`. No rejected closure
+is queued. An already-out-of-bound reference or an excessive opening lead still
+rejects; preparation and seven-joint progress waits/timeouts are unchanged.
+This is a position-reference limiter, not contact/grasp detection or calibrated
+force control. Existing motor-effort protections remain; holding a bounded
+position error does not certify a safe physical gripping force or a stable grasp.
+
+The gripper's **closed endpoint only** permits up to 1 degree of measured motor
+overtravel (the reviewed closed-finger failures read approximately -0.43/-0.60
+degrees at nominal zero). The aperture is represented by the calibrated closed
+endpoint, and the initial command reference stays inside the original range.
+Raw motor feedback is retained and still used for tracking/effort checks, including
+during preparation. No negative closing command is admitted. Larger excursions,
+open-end excursions and all seven arm-joint bounds still reject. This is an
+endpoint feedback tolerance, not a new physical calibration or extra motor travel.
 
 Verified geometry remains the default. A research trial may explicitly pass
 `--allow-nominal-geometry` **and** declare `calibration_verified: false` plus

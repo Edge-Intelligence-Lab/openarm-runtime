@@ -140,6 +140,13 @@
 
 ## 接入其他模型
 
+发布的 upright foundation 模型使用
+`openarm_policy.models.foundation:FoundationObservation` 和 `FoundationActions`，
+而不是历史模型的图像/动作配置。编码器显式读取模型图像契约与 HF 头部/腕部内参，
+对两路原生图像去畸变并全幅 bilinear 缩放；状态仍为外部 state8。
+解码器检查原始动作契约，只截断夹爪，位姿超界拒绝，保持 25/100 的动作块时序。
+实机准备位由安装配置给出，不把仿真复用标成实测标定；控制器、限位和停止路径不变。
+
 同一格式的新权重通常只需增加一个目录条目和对应profile，不改网页。
 新的模型家族需实现`reset(None)`、`predict(dict)`、`close()`预测器，返回
 有限`H×A`数组并发布稳定 metadata；编码器负责输入，解码器负责动作。

@@ -484,6 +484,35 @@ class ModelWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.workspace.snapshot()['execution'], 'failed')
         self.assertFalse(self.manager.release_motion.call_args.kwargs['clean'])
 
+    def test_unload_cannot_erase_execution_failure_or_clear_motion_lock(self):
+        self.check_unload_preserves_failure(clean=False)
+
+    def test_unload_preserves_failure_even_when_disable_was_verified(self):
+        self.check_unload_preserves_failure(clean=True)
+
+    def check_unload_preserves_failure(self, *, clean):
+        child, _ = self.start()
+        episode = self.workspace.run_root / 'episode'
+        episode.mkdir()
+        reason = 'left J6 outside gravity model limits'
+        (episode/'summary.json').write_text(json.dumps(dict(complete=True,
+            termination={'cleanup_errors': [] if clean else [reason], 'error': reason})))
+        child.code = 1
+        self.workspace._finished()
+        before = self.workspace.snapshot()
+        after = self.workspace.unload()
+        self.assertEqual(after['state'], 'unloaded')
+        self.assertIn(reason, after['error'])
+        self.assertEqual(after['execution_error'], before['error'])
+        self.assertEqual(after['execution'], before['execution'])
+        if not clean:
+            self.assertFalse(after['can_start'])
+            self.assertFalse(after['can_return_zero'])
+        self.manager.release_motion.assert_called_once()
+        self.workspace.error = '模型样例校验失败'
+        self.assertIn(reason, self.workspace.snapshot()['error'])
+        self.assertIn('模型样例校验失败', self.workspace.snapshot()['error'])
+
     def test_policy_failure_and_verified_cleanup_are_distinct(self):
         child, _ = self.start()
         episode = self.workspace.run_root / 'episode'

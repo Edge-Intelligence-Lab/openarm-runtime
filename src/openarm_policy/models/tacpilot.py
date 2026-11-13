@@ -6,6 +6,40 @@
 from ..contracts import TCP_POSE
 
 
+def validate_state_contract(spec):
+    """Explicit raw state8 semantics plus the expected checkpoint-only chart.
+
+    xyz is world metres; fingers are two positive half-apertures in metres.
+    The encoder never applies observation_adapter: the predictor owns it.
+    """
+    from copy import deepcopy
+    if (not isinstance(spec, dict) or set(spec) != {
+            'schema', 'quaternion_to_rotvec', 'observation_adapter'}
+            or spec['schema'] != 'tacpilot.tcp-state8.v1'
+            or spec['quaternion_to_rotvec'] not in ('scipy_shortest', 'acos_preserve_sign')
+            or (spec['observation_adapter'] is not None
+                and not isinstance(spec['observation_adapter'], dict))):
+        raise ValueError('Unsupported TCP state contract')
+    return deepcopy(spec)
+
+
+def tcp_state8(tcp, quaternion_to_rotvec='scipy_shortest'):
+    import numpy as np
+    if quaternion_to_rotvec == 'scipy_shortest':
+        from scipy.spatial.transform import Rotation
+        return np.r_[tcp[:3], Rotation.from_quat(tcp[3:7]).as_rotvec(),
+                     [tcp[7]/2]*2].astype(np.float32)
+    if quaternion_to_rotvec != 'acos_preserve_sign':
+        raise ValueError('Unknown quaternion conversion')
+    # Match training geometry.pose_state, including float32 arithmetic, XYZW,
+    # negative w and the original near-identity branch. Do not canonicalize q.
+    raw = np.r_[tcp[:7], [tcp[7]/2]*2].astype(np.float32)
+    w = np.clip(raw[6], -1, 1)
+    den = np.sqrt(1 - w*w)
+    scale = np.divide(2*np.arccos(w), den, out=np.zeros_like(w), where=den > 1e-8)
+    return np.r_[raw[:3], raw[3:6]*scale, raw[7:9]].astype(np.float32)
+
+
 def latest(observation, name):
     samples = observation.streams.get(name, ())
     if not samples or not samples[-1].valid or samples[-1].error:
@@ -18,7 +52,7 @@ def latest(observation, name):
 
 class UprightObservation:
     def __init__(self, overview, wrist, side="left", size=256, crops=None, execution=False,
-                 image_contract=None, head_calibration=None):
+                 image_contract=None, head_calibration=None, state_contract=None):
         if side not in ("left", "right") or type(size) is not int or size < 1:
             raise ValueError("Invalid side or image size")
         if overview == wrist:
@@ -27,11 +61,16 @@ class UprightObservation:
         self.size, self.crops = size, dict(crops or {})
         if type(execution) is not bool:raise ValueError('execution must be boolean')
         self.execution = execution
+        self.state_contract = None if state_contract is None else validate_state_contract(state_contract)
+        if self.state_contract is not None and execution:
+            raise ValueError('TCP state8 contract cannot describe execution state10')
         if set(self.crops) - {overview, wrist}:
             raise ValueError("Crop names must match selected camera streams")
         self.metadata = dict(overview=overview, wrist=wrist, side=side, size=size,
                               state_width=10 if execution else 8,
                               crops=self.crops, image_transform="BGR_to_RGB_area_resize")
+        if self.state_contract is not None:
+            self.metadata['state_contract'] = self.state_contract
         self.camera_matrix = self.distortion = None
         self.wrist_native_shape = None
         self.wrist_matrix = self.wrist_distortion = None
@@ -156,12 +195,13 @@ class UprightObservation:
 
     def encode(self, observation):
         import numpy as np
-        from scipy.spatial.transform import Rotation
         tcp = np.asarray(latest(observation, f"tcp/{self.side}"), dtype=float)
         if (tcp.shape != (8,) or not np.isfinite(tcp).all() or tcp[7] < 0
                 or not np.isclose(np.linalg.norm(tcp[3:7]), 1., atol=1e-6)):
             raise ValueError("Invalid measured task-frame TCP/opening")
-        state = np.r_[tcp[:3], Rotation.from_quat(tcp[3:7]).as_rotvec(), [tcp[7]/2]*2]
+        conversion = ('scipy_shortest' if self.state_contract is None
+                      else self.state_contract['quaternion_to_rotvec'])
+        state = tcp_state8(tcp, conversion)
         if self.execution:
             feedback = np.asarray(latest(observation, f'execution/{self.side}'), dtype=float)
             if (feedback.shape != (2,) or not np.isfinite(feedback).all()

@@ -34,7 +34,11 @@ class CartesianProgress:
             self.waiting_since = now
         if self.waiting_since is not None:
             if now < self.waiting_since or now-self.waiting_since > self.timeout:
-                raise TimeoutError("Cartesian progress failed to settle")
+                axis = differences.index(error)
+                raise TimeoutError("Cartesian progress failed to settle: "
+                                   f"J{axis+1} error={error:.6f} rad, "
+                                   f"resume<={self.resume_error:.6f} rad, "
+                                   f"waiting={now-self.waiting_since:.3f}s")
             if error > self.resume_error:
                 return False
             self.waiting_since = None

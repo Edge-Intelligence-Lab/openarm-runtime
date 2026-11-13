@@ -50,6 +50,55 @@ def tcp_spec():
 
 
 class CompositionTests(unittest.TestCase):
+    def test_state_contract_mismatch_or_missing_rejects_even_at_width8(self):
+        from copy import deepcopy
+        contract = {'schema': 'tacpilot.tcp-state8.v1',
+                    'quaternion_to_rotvec': 'acos_preserve_sign', 'observation_adapter': None}
+        wrong = dict(contract, quaternion_to_rotvec='scipy_shortest')
+        for encoder_contract in (wrong, None):
+            with self.subTest(encoder_contract=encoder_contract):
+                model = Mock(metadata={'state_width': 8, 'state_contract': deepcopy(contract)})
+                meta = {'state_width': 8}
+                if encoder_contract is not None:
+                    meta['state_contract'] = encoder_contract
+                encoder, decoder = Mock(metadata=meta), Mock(metadata={})
+                policy = ModelPolicy({}, {}, {})
+                with patch('openarm_policy.models.policy.component', side_effect=[model, encoder, decoder]):
+                    with self.assertRaisesRegex(ValueError, 'state contract'):
+                        policy.reset(Context(tcp_spec(), (), 20))
+                model.close.assert_called_once()
+
+    def test_state_contract_matches_across_http_metadata_wrapper(self):
+        contract = {'schema': 'tacpilot.tcp-state8.v1',
+                    'quaternion_to_rotvec': 'acos_preserve_sign', 'observation_adapter': None}
+        model = Mock(metadata={'model': {'state_width': 8, 'state_contract': contract}})
+        encoder = Mock(metadata={'state_width': 8, 'state_contract': contract})
+        decoder = Mock(metadata={})
+        policy = ModelPolicy({}, {}, {})
+        with patch('openarm_policy.models.policy.component', side_effect=[model, encoder, decoder]):
+            policy.reset(Context(tcp_spec(), (), 20))
+        policy.close()
+
+    def test_state_contract_boundary_is_not_limited_to_act(self):
+        contract = {'schema': 'example.joint-state.v1', 'units': 'rad', 'order': ['j1']}
+        model = Mock(metadata={'state_width': 1, 'state_contract': contract})
+        encoder = Mock(metadata={'state_width': 1, 'state_contract': contract})
+        policy = ModelPolicy({}, {}, {})
+        with patch('openarm_policy.models.policy.component', side_effect=[model, encoder, Mock(metadata={})]):
+            policy.reset(Context(ActionSpec(('j1',), (-1.,), (1.,)), (), 20))
+        policy.close()
+
+    def test_declared_no_adapter_rejects_old_checkpoint_before_optional_imports(self):
+        import json
+        from openarm_policy.models.act import TacPilotACT
+        contract = {'schema': 'tacpilot.tcp-state8.v1',
+                    'quaternion_to_rotvec': 'acos_preserve_sign', 'observation_adapter': None}
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d)/'observation-adapter.json').write_text(json.dumps({
+                'schema': 'tacpilot.fixed-relative-rotation-state.v1'}))
+            with self.assertRaisesRegex(ValueError, 'observation adapter'):
+                TacPilotACT(d, state_contract=contract).reset(None)
+
     def test_passive_import_without_optional_backends(self):
         code = ('import sys; import openarm_policy.models, openarm_policy.cartesian; '
                 'assert not set(("torch", "lerobot", "cv2", "pinocchio", "pink")) & set(sys.modules)')
@@ -130,6 +179,44 @@ class UprightTests(unittest.TestCase):
         self.assertEqual(inputs["image"].shape, (1, 256, 256, 3))
         self.np.testing.assert_array_equal(inputs["image"][0, 0, 0], [30, 20, 10])
         self.np.testing.assert_allclose(inputs["state"], [[0, 0, .5, 0, 0, 0, .03, .03]])
+
+    def test_fulltask_quaternion_formula_matches_training_float32_and_sign(self):
+        from scipy.spatial.transform import Rotation
+        from openarm_policy.models.tacpilot import tcp_state8
+        np = self.np
+        q = Rotation.from_rotvec([[np.deg2rad(t), 0, 0]
+                                 for t in [0, .001, 179.999, 180., 180.001, 359.999]]).as_quat()
+        q = np.concatenate([q, -q])
+        tcp = np.c_[np.tile([.25, .2, 1.04], (len(q), 1)), q, np.full(len(q), .06)]
+        raw = np.c_[tcp[:, :7], np.repeat(tcp[:, 7:8]/2, 2, axis=1)].astype(np.float32)
+        # Exact frozen geometry.pose_state formula on the whole training batch.
+        w = np.clip(raw[..., 6], -1, 1)
+        den = np.sqrt(1 - w*w)
+        scale = np.divide(2*np.arccos(w), den, out=np.zeros_like(w), where=den > 1e-8)
+        expected = np.concatenate([raw[:, :3], raw[:, 3:6]*scale[:, None], raw[:, 7:]], axis=-1)
+        actual = np.stack([tcp_state8(row, 'acos_preserve_sign') for row in tcp])
+        np.testing.assert_array_equal(actual, expected)
+        self.assertGreater(np.linalg.norm(actual[4, 3:6] - tcp_state8(tcp[4])[3:6]), 6.)
+        with self.assertRaises(ValueError):tcp_state8(tcp[0], 'guess')
+
+    def test_fulltask_encoder_uses_selected_state_rule_and_keeps_legacy_default(self):
+        from scipy.spatial.transform import Rotation
+        from openarm_policy.models.tacpilot import UprightObservation, tcp_state8
+        contract = {'schema': 'tacpilot.tcp-state8.v1',
+                    'quaternion_to_rotvec': 'acos_preserve_sign', 'observation_adapter': None}
+        streams = dict(self.obs.streams)
+        tcp = [.25, .2, 1.04, *Rotation.from_rotvec([3.15, 0, 0]).as_quat(), .06]
+        streams['tcp/left'] = (SensorSample(1, 9.9, tcp),)
+        obs = replace(self.obs, streams=streams)
+        encoder = UprightObservation('camera/overview', 'camera/wrist', state_contract=contract)
+        encoder.reset(self.context)
+        self.np.testing.assert_array_equal(encoder.encode(obs)['state'][0], tcp_state8(tcp, 'acos_preserve_sign'))
+        self.assertEqual(encoder.metadata['state_contract'], contract)
+        legacy = UprightObservation('camera/overview', 'camera/wrist')
+        self.np.testing.assert_array_equal(legacy.encode(obs)['state'][0], tcp_state8(tcp))
+        self.assertNotIn('state_contract', legacy.metadata)
+        with self.assertRaises(ValueError):
+            UprightObservation('camera/overview', 'camera/wrist', execution=True, state_contract=contract)
 
     def test_execution_encoder_requires_live_feedback_and_explicit_state10_opt_in(self):
         from openarm_policy.models.tacpilot import UprightObservation
@@ -234,6 +321,23 @@ class UprightTests(unittest.TestCase):
             with self.assertRaises(ValueError): grip.aperture(2.)
         for angles, gaps in (([0, 0], [0, .1]), ([0, 1, 2], [0, .1, .05])):
             with self.assertRaises(ValueError): GripperCalibration(angles, gaps)
+
+    def test_closed_feedback_margin_is_directional_and_never_expands_commands(self):
+        from openarm_policy.cartesian import GripperCalibration
+        import math
+        for sign in (1, -1):
+            grip = GripperCalibration([0., sign], [0., .08])
+            for measured in (-.0074387732, -.010490578, -math.radians(1)):
+                self.assertEqual(grip.feedback_motor(sign*measured), 0.)
+                self.assertEqual(grip.aperture(sign*measured), 0.)
+            for invalid in (-math.radians(1)-1e-6, float('nan'), float('inf')):
+                with self.assertRaises(ValueError): grip.aperture(sign*invalid)
+            # No tolerance at the open end, including a very short table.
+            with self.assertRaises(ValueError): grip.aperture(sign*1.000001)
+            short = GripperCalibration([0., sign*.01], [0., .08])
+            with self.assertRaises(ValueError): short.aperture(sign*.010001)
+            with self.assertRaises(ValueError): grip.angle(-.000001)
+            with self.assertRaises(ValueError): grip.angle(.080001)
 
     def test_loopback_transport_does_not_follow_redirects_or_use_proxies(self):
         from openarm_policy.models.http import NumpyHTTP
@@ -356,6 +460,78 @@ class CartesianDispatchTests(unittest.TestCase):
         self.robot.close()
         self.assertFalse(self.plant.started)
 
+    def test_closed_negative_feedback_starts_and_prepares_without_negative_commands(self):
+        measured = -.010490578
+        self.plant.values = (0.,)*7 + (measured,)
+        self.robot.start()
+        self.assertEqual(self.robot.reference[7], 0.)
+        samples = self.robot.snapshot()
+        self.assertEqual(samples['robot/left'].data[7][0], measured)
+        self.assertEqual(samples['tcp/left'].data[7], 0.)
+        _, actual = self.robot._feedback(samples)
+        self.assertEqual(actual[7], measured)
+        self.robot.begin_preparation()
+        self.robot.submit_preparation((0.,)*8, time.monotonic()+1)
+        self.robot.finish_preparation()
+        self.plant.values = (0.,)*7 + (measured,)
+        self.robot.submit((0., 0., 0., 0., 0., 0., 1., 0.), time.monotonic()+1)
+        self.assertTrue(all(command[1][7] >= 0. for command in self.plant.commands))
+        self.robot.close()
+
+    def test_closed_margin_does_not_hide_real_gripper_tracking_error(self):
+        self.plant.values = (0.,)*7 + (-.010490578,)
+        self.robot.start()
+        self.robot.reference[7] = .195
+        # A clamped feedback position would wrongly pass (.195 < .20).
+        # The actual error is .20549 rad and must still reject.
+        with self.assertRaisesRegex(RuntimeError, 'commanded lead exceeded'):
+            self.robot.submit((0., 0., 0., 0., 0., 0., 1., .195*.08), time.monotonic()+1)
+        self.assertFalse(self.plant.commands)
+        self.robot.close()
+
+    def test_preparation_preserves_closed_feedback_but_never_plans_negative_goal(self):
+        from openarm_policy.preparation import FixedJointPreparation
+        self.plant.values = (0.,)*7 + (-.010490578,)
+        self.robot.start()
+        stage = FixedJointPreparation('left', [{'name': 'ready', 'joints_rad': [0.]*7}])
+        stage.bind(self.robot, Context(self.robot.spec, self.robot.streams, 20))
+        samples = self.robot.snapshot()
+        observation = Observation(1, time.monotonic(), {k: (v,) for k, v in samples.items()})
+        plan = stage.begin(observation)
+        self.assertEqual(plan['initial_joints_rad'][7], -.010490578)
+        self.assertEqual(plan['initial_command_rad'][7], 0.)
+        self.assertEqual(stage.measured(observation)[7], -.010490578)
+        self.assertGreaterEqual(stage.step(observation).values[7], 0.)
+        # Only measured endpoint interpretation has tolerance; an explicitly
+        # supplied negative command remains invalid, including handoff goals.
+        other = FixedJointPreparation('left', [{'name': 'ready', 'joints_rad': [0.]*7}])
+        other.bind(self.robot, Context(self.robot.spec, self.robot.streams, 20))
+        with self.assertRaises(ValueError):
+            other.begin(observation, commanded_joints=(0.,)*7+(-.01,))
+        self.robot.close()
+
+    def test_large_negative_gripper_feedback_still_rejects_start(self):
+        import math
+        self.plant.values = (0.,)*7 + (-math.radians(1)-1e-6,)
+        with self.assertRaisesRegex(ValueError, 'Gripper feedback outside calibrated motor range'):
+            self.robot.start()
+        self.assertFalse(self.plant.started)
+        self.assertFalse(self.plant.commands)
+
+    def test_closed_upper_endpoint_feedback_with_reversed_calibration(self):
+        from openarm_policy.cartesian import CartesianRobot
+        robot = CartesianRobot(self.plant, dict(self.config,
+            gripper={'motor_rad': [0., 1.], 'opening_m': [.08, 0.]}))
+        self.plant.values = (0.,)*7 + (1.010490578,)
+        robot.start()
+        self.assertEqual(robot.reference[7], 1.)
+        self.assertAlmostEqual(robot.snapshot()['robot/left'].data[7][0], 1.010490578)
+        self.assertEqual(robot.snapshot()['tcp/left'].data[7], 0.)
+        robot.submit((0., 0., 0., 0., 0., 0., 1., .08), time.monotonic()+1)
+        self.assertLess(robot.reference[7], 1.)
+        self.assertLessEqual(self.plant.commands[-1][1][7], 1.)
+        robot.close()
+
     def test_expired_stale_workspace_and_failed_solver_send_nothing(self):
         self.robot.start()
         target = (0., 0., 0., 0., 0., 0., 1., .04)
@@ -364,6 +540,105 @@ class CartesianDispatchTests(unittest.TestCase):
         self.solver.step.side_effect = RuntimeError("QP failed")
         with self.assertRaises(RuntimeError): self.robot.submit(target, time.monotonic()+1)
         self.assertFalse(self.plant.commands)
+        self.robot.close()
+
+    def test_rejected_gripper_command_records_exact_candidate_without_dispatch(self):
+        events = []
+        self.robot.record = events.append
+        self.robot.start()
+        self.plant.values = (0.,)*7 + (.3,)
+        target = (0., 0., 0., 0., 0., 0., 1., 0.)
+        with self.assertRaisesRegex(RuntimeError, 'Cartesian commanded lead exceeded: .*gripper error=0.300000'):
+            self.robot.submit(target, time.monotonic()+1)
+        event = events[-1]
+        self.assertEqual(event['event'], 'cartesian_command_rejected')
+        self.assertEqual(event['measured_joints_rad'][7], .3)
+        self.assertEqual(event['candidate_joints_rad'][7], 0.)
+        self.assertEqual(event['gripper_limit_rad'], .2)
+        self.assertFalse(self.plant.commands)
+        self.robot.close()
+
+    def test_blocked_closing_holds_safe_reference_and_opening_still_responds(self):
+        events = []
+        self.robot.record = events.append
+        self.robot.start()
+        # Frozen last feedback from the reviewed closure failure, not a contact
+        # simulation. No motor, force estimate or successful-grasp assumption.
+        measured = .22144655527580603
+        reference = .040306570424160186
+        self.robot.reference[7] = reference
+        target = (0., 0., 0., 0., 0., 0., 1., .017479968756121296 * .08)
+        for _ in range(100):
+            self.plant.values = (0.,)*7 + (measured,)
+            self.robot.submit(target, time.monotonic()+1)
+            self.assertEqual(self.plant.commands[-1][1][7], reference)
+            self.assertTrue(events[-1]['gripper_closure_limited'])
+            self.assertLessEqual(abs(self.robot.reference[7]-measured), .2)
+        self.assertEqual(self.solver.step.call_count, 100)
+        self.assertEqual(len(self.plant.commands), 100)
+        # No latch: a new opening goal is handled with the original slew limit.
+        self.plant.values = (0.,)*7 + (measured,)
+        self.robot.submit((*target[:7], .08), time.monotonic()+1)
+        self.assertAlmostEqual(self.robot.reference[7], reference+.025)
+        self.assertFalse(events[-1]['gripper_closure_limited'])
+        # Once measured feedback catches up, closing can advance again.
+        self.plant.values = tuple(self.robot.reference)
+        before = self.robot.reference[7]
+        self.robot.submit(target, time.monotonic()+1)
+        self.assertAlmostEqual(self.robot.reference[7], before-.025)
+        self.assertFalse(events[-1]['gripper_closure_limited'])
+        self.robot.close()
+
+    def test_closing_limit_handles_reversed_motor_direction(self):
+        from openarm_policy.cartesian import CartesianRobot
+        robot = CartesianRobot(self.plant, dict(self.config,
+            gripper={'motor_rad': [0., 1.], 'opening_m': [.08, 0.]}))
+        events = []; robot.record = events.append
+        self.plant.values = (0.,)*7 + (.5,)
+        robot.start()
+        robot.reference[7] = .69
+        self.solver.step.return_value['joints'] = [.001] + [0.]*6
+        for _ in range(20):
+            self.plant.values = (0.,)*7 + (.5,)
+            robot.submit((0., 0., 0., 0., 0., 0., 1., 0.), time.monotonic()+1)
+            self.assertAlmostEqual(robot.reference[7], .69)
+            self.assertEqual(self.plant.commands[-1][1][0], .001)
+            self.assertTrue(events[-1]['gripper_closure_limited'])
+        self.plant.values = (0.,)*7 + (.5,)
+        robot.submit((0., 0., 0., 0., 0., 0., 1., .08), time.monotonic()+1)
+        self.assertAlmostEqual(robot.reference[7], .665)
+        self.assertFalse(events[-1]['gripper_closure_limited'])
+        robot.close()
+
+    def test_closing_limiter_does_not_mask_opening_or_existing_feedback_fault(self):
+        self.robot.start()
+        target = (0., 0., 0., 0., 0., 0., 1., .08)
+        self.robot.reference[7] = .19
+        # Opening away from measured feedback is still a hard fault, not contact.
+        with self.assertRaisesRegex(RuntimeError, 'commanded lead exceeded'):
+            self.robot.submit(target, time.monotonic()+1)
+        self.assertFalse(self.plant.commands)
+        # Even a closing request cannot disguise an already-unsafe reference.
+        self.plant.values = (0.,)*7 + (.5,)
+        with self.assertRaisesRegex(RuntimeError, 'commanded lead exceeded'):
+            self.robot.submit((*target[:7], 0.), time.monotonic()+1)
+        self.assertFalse(self.plant.commands)
+        self.robot.close()
+
+    def test_unblocked_closing_keeps_original_slew_and_arm_guard_still_wins(self):
+        self.plant.values = (0.,)*7 + (.5,)
+        self.robot.start()
+        target = (0., 0., 0., 0., 0., 0., 1., 0.)
+        self.robot.submit(target, time.monotonic()+1)
+        self.assertAlmostEqual(self.robot.reference[7], .475)
+        self.robot.reference[7] = .31
+        self.plant.values = (0.,)*7 + (.5,)
+        self.solver.step.return_value['joints'] = [.2] + [0.]*6
+        count = len(self.plant.commands)
+        with self.assertRaisesRegex(RuntimeError, 'commanded lead exceeded'):
+            self.robot.submit(target, time.monotonic()+1)
+        self.assertEqual(len(self.plant.commands), count)
+        self.assertEqual(self.robot.reference[7], .31)
         self.robot.close()
 
     def test_joint_command_margin_reaches_both_solvers_and_preserves_hard_feedback_guard(self):

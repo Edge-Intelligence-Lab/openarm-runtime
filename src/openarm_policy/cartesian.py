@@ -12,6 +12,10 @@ from .contracts import ActionSpec, SensorSample, StreamSpec, TCP_POSE, finite
 
 class GripperCalibration:
     """Measured monotonic motor-radian / physical-aperture table, either sign."""
+    # Closed fingers can settle slightly past their nominal zero. This is only
+    # a feedback interpretation margin, never extra commanded motor travel.
+    closed_feedback_tolerance_rad = math.radians(1)
+
     def __init__(self, motor_rad, opening_m):
         import numpy as np
         self.motor = np.asarray(motor_rad, dtype=float)
@@ -26,10 +30,22 @@ class GripperCalibration:
         if not (np.diff(self.motor) > 0).all() or not ((change > 0).all() or (change < 0).all()):
             raise ValueError("Gripper calibration must be strictly monotonic")
 
+    def feedback_motor(self, motor):
+        """Map only small closed-end overtravel to the calibrated endpoint."""
+        motor = float(motor)
+        closed_at_lower = self.opening[0] < self.opening[-1]
+        closed = self.motor[0] if closed_at_lower else self.motor[-1]
+        past_closed = motor < self.motor[0] if closed_at_lower else motor > self.motor[-1]
+        if (finite(motor) and abs(motor - closed) <= self.closed_feedback_tolerance_rad
+                and past_closed):
+            return float(closed)
+        if not finite(motor) or not self.motor[0] <= motor <= self.motor[-1]:
+            raise ValueError("Gripper feedback outside calibrated motor range")
+        return motor
+
     def aperture(self, motor):
         import numpy as np
-        if not finite(float(motor)) or not self.motor[0] <= motor <= self.motor[-1]:
-            raise ValueError("Gripper feedback outside calibrated motor range")
+        motor = self.feedback_motor(motor)
         return float(np.interp(motor, self.motor, self.opening))
 
     def angle(self, opening):
@@ -136,6 +152,13 @@ class CartesianRobot:
         return (float(np.linalg.norm(measured[:3, 3]-target[:3, 3])),
                 float(Rotation.from_matrix(target[:3, :3].T @ measured[:3, :3]).magnitude()))
 
+    def preparation_feedback_reference(self, values):
+        """Validate measured joints, returning an in-range initial grip goal."""
+        checked = list(values)
+        checked[7] = self.gripper.feedback_motor(checked[7])
+        self.preparation_spec.validate(tuple(checked))
+        return tuple(checked)
+
     def submit_preparation(self, values, valid_until):
         """Typed joint setup through the same underlying worker/lease, not TCP IK."""
         import numpy as np
@@ -191,7 +214,9 @@ class CartesianRobot:
             raise ValueError("Invalid Cartesian robot feedback")
         measured = state[:, 0]
         lower, upper = np.asarray(self.robot.spec.lower), np.asarray(self.robot.spec.upper)
-        outside = np.flatnonzero((measured < lower) | (measured > upper))
+        checked = measured.copy()
+        checked[7] = self.gripper.feedback_motor(measured[7])
+        outside = np.flatnonzero((checked < lower) | (checked > upper))
         if len(outside):
             i = int(outside[0])
             self.record({"event": "joint_feedback_out_of_range", "time": time.monotonic(),
@@ -200,7 +225,9 @@ class CartesianRobot:
                          "all_positions_rad": measured.tolist()})
             raise ValueError(f"Measured {self.robot.spec.names[i]}={measured[i]:.8g} rad outside "
                              f"joint safety range [{lower[i]:.8g}, {upper[i]:.8g}] rad")
-        self.robot.spec.validate(tuple(float(v) for v in measured))
+        self.robot.spec.validate(tuple(float(v) for v in checked))
+        # Tracking/effort checks and raw robot recordings still use the actual
+        # encoder position, including a small negative closed-end reading.
         return sample, measured
 
     def _tcp(self, joints):
@@ -218,13 +245,15 @@ class CartesianRobot:
         try:
             _, measured = self._feedback(self.robot.snapshot())
             self.reference = measured.copy()
+            self.reference[7] = self.gripper.feedback_motor(measured[7])
             self.target = self._tcp(measured)
             self.spec.validate(tuple(float(v) for v in self.target))
             self.solver = DifferentialIK(self.chain, lower=self.robot.spec.lower[:7],
                 upper=self.robot.spec.upper[:7], velocity=[self.speed]*7, posture=measured[:7],
                 command_margin_rad=self.joint_margin)
             self.record({"event": "cartesian_context", "time": time.monotonic(),
-                         "calibration": self.config, "model": self.chain.metadata,
+                          "calibration": self.config, "model": self.chain.metadata,
+                          "gripper_closed_feedback_tolerance_rad": self.gripper.closed_feedback_tolerance_rad,
                          "joint_command_margin_rad": self.joint_margin,
                          "joint_hard_lower_rad": list(self.robot.spec.lower[:7]),
                          "joint_hard_upper_rad": list(self.robot.spec.upper[:7])})
@@ -278,8 +307,28 @@ class CartesianRobot:
         solved = self.solver.step(self.reference[:7], target_base, self.period)
         joints = np.r_[solved["joints"], self.reference[7] + np.clip(
             self.gripper.angle(values[7]) - self.reference[7], -self.grip_speed*self.period, self.grip_speed*self.period)]
+        # A blocked closing goal must not accumulate beyond the existing lead
+        # bound. Hold only an already-safe reference, never re-anchor to feedback
+        # or infer a successful grasp. Opening and genuine tracking faults retain
+        # their normal path, including the hard guard below.
+        closing = ((joints[7] - self.reference[7]) *
+                   (self.gripper.opening[-1] - self.gripper.opening[0]) < 0)
+        gripper_limited = bool(closing and abs(joints[7] - measured[7]) > .20
+                               and abs(self.reference[7] - measured[7]) <= .20)
+        if gripper_limited:
+            joints[7] = self.reference[7]
         if max(abs(joints[:7] - measured[:7])) > self.tracking or abs(joints[7] - measured[7]) > .20:
-            raise RuntimeError("Cartesian commanded lead exceeded")
+            self.record({"event": "cartesian_command_rejected", "time": time.monotonic(),
+                         "reason": "commanded_lead", "side": self.side,
+                         "candidate_joints_rad": joints.tolist(),
+                         "measured_joints_rad": measured.tolist(),
+                         "reference_joints_rad": self.reference.tolist(),
+                         "joint_limit_rad": self.tracking, "gripper_limit_rad": .20})
+            errors = abs(joints - measured)
+            axis = int(np.argmax(errors[:7]))
+            raise RuntimeError("Cartesian commanded lead exceeded: "
+                               f"J{axis+1} error={errors[axis]:.6f} rad (limit {self.tracking:.6f}); "
+                               f"gripper error={errors[7]:.6f} rad (limit 0.200000)")
         realized = self._tcp(joints)
         self.spec.validate(tuple(float(v) for v in realized))
         if time.monotonic() - now > self.period:
@@ -290,8 +339,9 @@ class CartesianRobot:
         self.last_submit = now
         self.dispatch_sequence += 1
         self.record({"event": "cartesian_dispatch", "time": time.monotonic(),
-                     "requested_task_tcp": list(values), "governed_task_tcp": list(governed), "joint_targets": sent,
-                     "measured_task_tcp": self._tcp(measured).tolist(),
+                      "requested_task_tcp": list(values), "governed_task_tcp": list(governed), "joint_targets": sent,
+                      "gripper_closure_limited": gripper_limited,
+                      "measured_task_tcp": self._tcp(measured).tolist(),
                      "commanded_task_tcp": realized.tolist(), "ik": solved})
 
     def close(self):

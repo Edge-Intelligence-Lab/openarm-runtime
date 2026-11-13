@@ -57,6 +57,13 @@ class ModelPolicy:
             if width is not None and encoded_width is not None and width != encoded_width:
                 raise ValueError('Checkpoint and observation encoder state widths differ')
             encoder_meta = getattr(encoder, 'metadata', {})
+            state_key = 'state_contract'
+            if state_key in model_meta or state_key in encoder_meta:
+                for meta in (model_meta, encoder_meta):
+                    if not isinstance(meta.get(state_key), dict) or not meta[state_key]:
+                        raise ValueError('Both model and encoder must publish a state contract')
+                if model_meta[state_key] != encoder_meta[state_key]:
+                    raise ValueError('Checkpoint and observation encoder state contracts differ')
             image_key = 'image_contract'
             if image_key in model_meta or image_key in encoder_meta:
                 for meta in (model_meta, encoder_meta):

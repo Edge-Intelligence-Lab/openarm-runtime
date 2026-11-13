@@ -11,21 +11,30 @@ import subprocess
 
 
 class TacPilotACT:
-    def __init__(self, checkpoint, device="cpu"):
+    def __init__(self, checkpoint, device="cpu", state_contract=None):
         self.checkpoint, self.device = Path(checkpoint), device
+        from .tacpilot import validate_state_contract
+        self.state_contract = None if state_contract is None else validate_state_contract(state_contract)
         self.policy = None
 
     def reset(self, context):
+        root = self.checkpoint
+        if not root.is_dir():
+            raise ValueError("Checkpoint must be a complete local model directory")
+        adapter = root / "observation-adapter.json"
+        self.adapter = json.loads(adapter.read_text()) if adapter.exists() else None
+        execution = root / 'execution-adapter.json'
+        if self.state_contract is not None:
+            if self.adapter != self.state_contract['observation_adapter']:
+                raise ValueError('Checkpoint observation adapter differs from the model state contract')
+            if execution.exists():
+                raise ValueError('TCP state8 contract cannot load execution state10')
         import torch
         from safetensors.torch import load_file
         from lerobot.policies.act.configuration_act import ACTConfig
         from lerobot.policies.act.modeling_act import ACTPolicy
-        root = self.checkpoint
-        if not root.is_dir():
-            raise ValueError("Checkpoint must be a complete local model directory")
         weights = root / "model.safetensors"
         cfg = ACTConfig.from_pretrained(root, local_files_only=True)
-        execution = root/'execution-adapter.json'
         self.execution_adapter = json.loads(execution.read_text()) if execution.exists() else None
         self.state_width = 8
         if self.execution_adapter is not None:
@@ -33,8 +42,6 @@ class TacPilotACT:
                         'features': ['waiting', 'joint_tracking_error_fraction'], 'tracking_scale_rad': .15}
             if self.execution_adapter != expected:raise ValueError('Unsupported execution-state adapter')
             self.state_width = 10
-        adapter = root / "observation-adapter.json"
-        self.adapter = json.loads(adapter.read_text()) if adapter.exists() else None
         # External state remains state8; rotation6d is checkpoint-bound internal
         # preprocessing, not a change to measured robot-state/action semantics.
         self.feature_width = self.relative_state([[0.] * self.state_width]).shape[-1]
@@ -60,8 +67,10 @@ class TacPilotACT:
         for field in ("mean", "std"):
             torch.testing.assert_close(self.stats["action." + field].cpu(), post["action." + field])
         self.metadata = {"family": "tacpilot_act", "checkpoint": str(root), "device": self.device,
-                         "state_width": self.state_width, "feature_width": self.feature_width,
+                          "state_width": self.state_width, "feature_width": self.feature_width,
                          "execution_adapter": self.execution_adapter}
+        if self.state_contract is not None:
+            self.metadata['state_contract'] = self.state_contract
         try:
             revision = subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'],
                                       capture_output=True, text=True)

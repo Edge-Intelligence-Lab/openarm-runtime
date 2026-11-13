@@ -87,6 +87,7 @@ class FixedJointPreparation:
     def bind(self, robot, context):
         expected = tuple(f"{self.side}.joint{i}" for i in range(1, 8)) + (f"{self.side}.gripper_motor",)
         self.spec = getattr(robot, "preparation_spec", robot.spec)
+        self.feedback_reference = getattr(robot, "preparation_feedback_reference", None)
         self.pose_error = getattr(robot, "preparation_pose_error", None)
         if any(w["tcp_tolerance"] is not None for w in self.waypoints) and not callable(self.pose_error):
             raise ValueError("TCP arrival requires an explicit robot FK capability")
@@ -113,7 +114,10 @@ class FixedJointPreparation:
         if not finite(sample.received_at) or not 0 <= observation.captured_at-sample.received_at <= .15:
             raise RuntimeError("Preparation robot feedback stale")
         values = vector([row[0] for row in sample.data], 8, "measured preparation joints")
-        self.spec.validate(values)
+        if self.feedback_reference is None:
+            self.spec.validate(values)
+        else:
+            self.feedback_reference(values)
         return values
 
     def begin(self, observation, *, commanded_joints=None):
@@ -121,6 +125,8 @@ class FixedJointPreparation:
             raise RuntimeError("Bind once and use a fresh preparation per session")
         actual = self.measured(observation)
         origin = actual if commanded_joints is None else vector(commanded_joints, 8, 'last dispatched joints')
+        if commanded_joints is None and self.feedback_reference is not None:
+            origin = self.feedback_reference(actual)
         self.spec.validate(origin)
         if max(abs(a-b) for a, b in zip(origin[:7], actual[:7])) > .15 or abs(origin[7]-actual[7]) > .20:
             raise RuntimeError('Preparation handoff tracking error exceeded')
