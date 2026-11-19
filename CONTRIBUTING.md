@@ -46,10 +46,11 @@ including exception cleanup, rather than copying implementation details.
 Record actual hardware checks separately in [validation](docs/validation.md).
 Keep device configuration, calibration, logs and cached assets outside Git.
 
-Head and wrist camera parameters have a single source on Hugging Face. `configs/cameras/`
-keeps only a repository/commit/path reference, without parameter copies, file
-hashes or per-file sizes. Raw evidence and machine/device configuration stay
-external. See `configs/cameras/README.md` for usage and validity limits.
+The simulation package includes a generic robot, base scene and the measured
+default camera parameters. Keep task scenes and project-specific calibrations in
+the consuming project. Retain camera frames, units and validity limits.
+When updating the bundled robot, preserve its source revision, mesh paths and
+license, and verify the installed wheel runs the headless scene.
 
 ## API changes
 

@@ -18,6 +18,11 @@
   installed as dependencies. NiceGUI supplies its frontend assets and uses
   FastAPI (MIT), Starlette and Uvicorn (BSD3-Clause); their sources are not vendored.
 - Viser1.1.1, yourdfpy and pycollada are optional visualization dependencies.
+- The standalone simulation bundles the unmodified OpenArm v2 bimanual MJCF
+  and meshes it references from [Enactic OpenArm MuJoCo](https://github.com/enactic/openarm_mujoco/tree/06b4c8ad6d547c3faaa3bf780629ee3e1ac2b0d0).
+  These assets are Apache-2.0, with the upstream license included in
+  `src/openarm_simulation/assets/openarm-v2/LICENSE`. The adjacent `base.xml`
+  is Runtime's scene wrapper. MuJoCo is an optional installed dependency.
 - Official OpenArm description assets are downloaded into a caller-supplied cache
   and hash-verified; the asset preparation workflow retains upstream LICENSE.txt.
 - Follower gains and leader direction/J6–J7 mapping were checked against the user's

@@ -51,3 +51,11 @@ no-build-isolation-package = ["openarm-can"]
 openarm_video = ["static/*.html", "static/*.js", "native/*.cpp"]
 
 openarm_platform = ["static/*.css", "static/*.js"]
+
+openarm_runtime = ["calibration/*.json"]
+openarm_simulation = [
+  "assets/openarm-v2/LICENSE",
+  "assets/openarm-v2/*.xml",
+  "assets/openarm-v2/assets/**/*.obj",
+  "assets/openarm-v2/assets/**/*.stl",
+]

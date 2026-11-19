@@ -6,14 +6,22 @@ the CLI for live inspection and user-operated control.
 
 Python 3.12 · MIT · Linux SocketCAN for followers · Independent community project
 
-## Head and wrist camera parameters
+## Simulate OpenArm v2
 
-[One HF reference](configs/cameras/current.json) pins the repository, commit and
-paths for head and wrist parameters, without local parameter copies. See
-[camera conventions and limitations](configs/cameras/README.md). The head baseline
-is installation-specific; the wrist file is not two independently measured full
-calibrations. Fetch parameters externally and select them explicitly; nothing is
-automatically downloaded or activated. Raw calibration evidence stays external.
+From the repository root with Python 3.12:
+
+```sh
+python -m pip install '.[simulation]'
+openarm-runtime simulate
+openarm-runtime simulate --view
+```
+
+The included OpenArm v2 model and floor scene run locally after installation.
+The scene uses the bundled head camera calibration. Use
+`openarm-runtime camera-parameters` to read it, or
+`openarm-runtime simulate --calibration /path/to/head.json` to replace it.
+Pass `--scene /path/to/scene.xml` to run your own MuJoCo scene.
+See [simulation](docs/simulation.md) for scene composition and platform integration.
 
 ## Policy execution and gravity compensation
 

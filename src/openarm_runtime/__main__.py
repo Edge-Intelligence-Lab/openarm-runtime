@@ -14,6 +14,12 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare", help="Download and verify pinned model assets only")
     prepare.add_argument("--asset-root", type=Path, required=True)
+    simulate = commands.add_parser("simulate", help="Run the bundled OpenArm v2 MuJoCo scene")
+    simulate.add_argument("--scene", type=Path, help="Use another local MJCF scene")
+    simulate.add_argument("--calibration", type=Path, help="Use a local head camera calibration")
+    mode = simulate.add_mutually_exclusive_group()
+    mode.add_argument("--steps", type=int, default=100, help="Headless physics steps (default: 100)")
+    mode.add_argument("--view", action="store_true", help="Open the interactive MuJoCo viewer")
     leader = commands.add_parser("leader", help="Leader calibration and preview; optional operator-started physical following")
     leader.add_argument("--left-port", required=True)
     leader.add_argument("--right-port", required=True)
@@ -79,6 +85,9 @@ def main():
     snapshot_command = commands.add_parser("snapshot", help="Read-only disabled-arm feedback; never enable or move")
     snapshot_command.add_argument("--side", choices=("left", "right"), default="left")
     snapshot_command.add_argument("--output", type=Path, help="New JSON file outside Git")
+    camera_parameters = commands.add_parser("camera-parameters", help="Print bundled or external camera parameters")
+    camera_parameters.add_argument("--camera", choices=("head", "wrist"), default="head")
+    camera_parameters.add_argument("--calibration", type=Path, help="Read another local calibration JSON")
     camera_calibrate = commands.add_parser("camera-calibrate", help="Offline measured-board hand-eye fit; never opens devices")
     camera_calibrate.add_argument("--observations", type=Path, required=True)
     camera_calibrate.add_argument("--output", type=Path, required=True, help="New calibration estimate JSON; never installed automatically")
@@ -95,6 +104,16 @@ def main():
     from openarm_collection.cli import configure as configure_collection
     configure_collection(commands.add_parser("collection", help="Inspect, review and export demonstration episodes"))
     args = parser.parse_args()
+    if args.command == "simulate":
+        if args.steps < 0:
+            parser.error("--steps must be nonnegative")
+        from openarm_simulation.standalone import run
+        run(args.scene, steps=args.steps, view=args.view, calibration=args.calibration)
+        return
+    if args.command == "camera-parameters":
+        from .camera_parameters import load_camera_parameters
+        print(json.dumps(load_camera_parameters(args.camera, args.calibration), indent=2))
+        return
     if args.command == "camera-calibrate":
         from .camera_calibration import run
         run(args)
