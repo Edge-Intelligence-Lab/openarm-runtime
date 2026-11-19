@@ -54,6 +54,8 @@ class PlatformConfig:
     simulation_profile: Path | None = None
     teleop_calibration_profile: Path | None = None
     model_catalog: Path | None = None
+    tls_cert: Path | None = None
+    tls_key: Path | None = None
 
     @property
     def services(self):
@@ -64,6 +66,12 @@ class PlatformConfig:
 
 
 def validate(config):
+    if (config.tls_cert is None) != (config.tls_key is None):
+        raise ValueError("TLS certificate and key must be configured together")
+    if config.tls_cert is not None and config.simulation_profile is None:
+        raise ValueError("Platform TLS is currently available only in simulation mode")
+    if config.tls_cert is not None and config.host == "0.0.0.0":
+        raise ValueError("Simulation TLS requires an explicit bind address")
     if config.simulation_profile is not None and any(p.command for p in config.services):
         raise ValueError('Simulation platform forbids all external/hardware service commands')
     if config.simulation_profile is not None:
@@ -95,7 +103,7 @@ def validate(config):
 
 def load_config(path=None):
     data = {} if path is None else json.loads(Path(path).expanduser().read_text())
-    if not isinstance(data, dict) or set(data) - {'title', 'port', 'services', 'support', 'log_dir', 'policy_record_root', 'collection_root', 'calibration_root', 'host', 'allowed_clients','simulation_profile','teleop_calibration_profile','head_calibration_port','model_catalog'}:
+    if not isinstance(data, dict) or set(data) - {'title', 'port', 'services', 'support', 'log_dir', 'policy_record_root', 'collection_root', 'calibration_root', 'host', 'allowed_clients','simulation_profile','teleop_calibration_profile','head_calibration_port','model_catalog','tls_cert','tls_key'}:
         raise ValueError('Invalid platform configuration fields')
     base = Path.cwd() if path is None else Path(path).expanduser().resolve().parent
     simulation='simulation_profile' in data
@@ -143,10 +151,11 @@ def load_config(path=None):
         pages=[replace(p,port=None,path='/simulation/'+p.id,extra_ports=(),exclusive_group=None)
                if p.id!='vision' else p for p in pages]
         descriptions=dict(control='MuJoCo 场景、关节反馈与标定入口',
-            teleop='仿真遥操尚未接入 · 不连接主臂',
+            teleop='PICO 4 手柄控制 MuJoCo 仿真机械臂',
             tactile='仿真触觉尚未建模 · 不提供伪造读数',
             vision='MuJoCo 头部与场景渲染相机')
-        pages=[replace(p,description=descriptions[p.id]) for p in pages]
+        pages=[replace(p,description=descriptions[p.id],
+                       label='PICO 仿真遥操' if p.id=='teleop' else p.label) for p in pages]
     support = data.get('support', {})
     if not isinstance(support, dict):
         raise ValueError('support must be an object')
@@ -209,4 +218,6 @@ def load_config(path=None):
                                     data.get('host','127.0.0.1'),tuple(clients),
                                       path_value(data['simulation_profile']) if simulation else None,
                                        path_value(data['teleop_calibration_profile']) if 'teleop_calibration_profile' in data else None,
-                                       path_value(data['model_catalog']) if 'model_catalog' in data else None))
+                                       path_value(data['model_catalog']) if 'model_catalog' in data else None,
+                                       path_value(data['tls_cert']) if 'tls_cert' in data else None,
+                                       path_value(data['tls_key']) if 'tls_key' in data else None))

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PICO 仿真遥操 · OpenArm</title>
+  <style>
+    body {font: 1rem/1.5 system-ui,sans-serif; margin: auto; padding: 1.25rem; max-width: 52rem; color: #15271e; background: #f6f8f6;}
+    h1 {font-size: 1.4rem;}
+    button {font: inherit; padding: .45rem .8rem; cursor: pointer;}
+    canvas {display: none;}
+    img {display: block; width: 100%; max-height: 58vh; object-fit: contain; background: #151c19;}
+  </style>
+  <script src="/simulation/pico.js" defer></script>
+</head>
+<body>
+  <h1>PICO 仿真遥操</h1>
+  <p>按住右手柄握键移动左臂末端，松开即停止跟随。</p>
+  <button id="enter" disabled>进入 VR</button>
+  <button id="stop" disabled>退出 VR</button>
+  <p id="status" role="status">正在检查 WebXR…</p>
+  <img id="preview" alt="MuJoCo 仿真场景">
+  <canvas id="xr" aria-hidden="true"></canvas>
+</body>
+</html>

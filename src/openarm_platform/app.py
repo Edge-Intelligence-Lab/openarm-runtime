@@ -5,6 +5,7 @@ Importing this module is passive and does not require the platform extra.
 import asyncio
 import ipaddress
 from contextlib import asynccontextmanager
+from dataclasses import replace
 import json
 import socket
 import re
@@ -27,6 +28,7 @@ class Coordinator:
         self.attach_only = attach_only
         self.closing = False
         self.models = None
+        self.pico = None
         self._operations = set()
 
     async def _call(self, function, *args):
@@ -73,12 +75,16 @@ class Coordinator:
     async def stop_motion(self):
         if self.attach_only:
             raise ValueError('只读平台不能停止外部控制')
+        if self.pico is not None:
+            self.pico.stop()
         if self.models is not None:
             await self._call(self.models.stop)
         return self.with_builtin(await self._call(self.manager.stop_motion))
 
     def begin_shutdown(self):
         self.closing = True
+        if self.pico is not None:
+            self.pico.stop()
 
     async def close(self):
         self.begin_shutdown()
@@ -95,12 +101,13 @@ class LocalBoundary:
     # hostname, not arbitrary .localhost names; origin/port equality stays below.
     allowed_hosts = LOCAL_HOSTS
 
-    def __init__(self, app, host='127.0.0.1', allowed_clients=(), port=8888):
+    def __init__(self, app, host='127.0.0.1', allowed_clients=(), port=8888, *, https=False):
         self.app = app
         self.allowed_hosts = (*LOCAL_HOSTS,host)
         self.allow_ip_hosts = host == '0.0.0.0'
         self.lan_host = host if host != '127.0.0.1' else None
         self.port = port
+        self.origin_scheme = "https" if https else "http"
         self.client_networks = tuple(ipaddress.ip_network(n) for n in allowed_clients)
 
     async def __call__(self, scope, receive, send):
@@ -130,8 +137,9 @@ class LocalBoundary:
                 client_allowed = peer.is_loopback or any(peer in n for n in self.client_networks)
             except (ValueError,TypeError,KeyError):
                 client_allowed = False
-        if (not valid or not client_allowed or (origins and origins != ['http://' + host])
-                or (unsafe and origins != ['http://' + host])):
+        expected_origin = f'{self.origin_scheme}://{host}'
+        if (not valid or not client_allowed or (origins and origins != [expected_origin])
+                or (unsafe and origins != [expected_origin])):
             if scope['type'] == 'websocket':
                 await send({'type': 'websocket.close', 'code': 1008})
             else:
@@ -168,6 +176,10 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
     except ImportError as exc:
         raise RuntimeError('平台需要可选依赖：pip install "openarm-runtime[platform]"') from exc
 
+    if attach_only and config.simulation_profile is not None:
+        config = replace(config, pages=tuple(
+            replace(page, label='仿真遥操', description='只读模式 · 仿真遥操已禁用')
+            if page.id == 'teleop' else page for page in config.pages))
     if manager is None:
         manager = ServiceManager(config.services, config.log_dir)
     coordinator = Coordinator(manager, attach_only=attach_only,
@@ -241,7 +253,11 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
     app.state.coordinator = coordinator
     app.state.shutdown_error = None
     app.state.simulation_backend=simulation
-    app.add_middleware(LocalBoundary,host=config.host,allowed_clients=config.allowed_clients,port=config.port)
+    app.add_middleware(LocalBoundary, host=config.host, allowed_clients=config.allowed_clients,
+                       port=config.port, https=config.tls_cert is not None)
+    if simulation is not None and not attach_only:
+        from .pico import install_pico
+        coordinator.pico = install_pico(app, simulation)
 
     @app.get('/api/config')
     async def configuration():
@@ -336,9 +352,10 @@ def create_app(config, manager=None, *, attach_only=False, with_ui=True):
             def simulation_control_page():
                 build_simulation_view(simulation,attach_only=attach_only)
 
-            @ui.page('/simulation/teleop',title='仿真遥操 · OpenArm')
-            def simulation_teleop_page():
-                ui.label('仿真模式 · 遥操尚未接入，不会连接主臂串口。')
+            if attach_only:
+                @ui.page('/simulation/teleop', title='仿真遥操 · OpenArm')
+                def simulation_teleop_page():
+                    ui.label('只读模式 · 仿真遥操已禁用。')
 
             @ui.page('/simulation/tactile',title='仿真触觉 · OpenArm')
             def simulation_tactile_page():
@@ -383,8 +400,10 @@ def serve(config, *, attach_only=False):
             app, host=config.host, port=config.port, workers=1, reload=False,
             access_log=False, proxy_headers=False, server_header=False,
             ws_max_size=64 * 1024 * 1024, timeout_graceful_shutdown=10,
+            ssl_certfile=config.tls_cert, ssl_keyfile=config.tls_key,
         ))
-        print(f'OpenArm Platform: http://{config.host}:{config.port}', flush=True)
+        scheme = 'https' if config.tls_cert else 'http'
+        print(f'OpenArm Platform: {scheme}://{config.host}:{config.port}', flush=True)
         if config.host != '127.0.0.1':
             if config.host == '0.0.0.0':
                 print('All IPv4 interfaces are exposed without login. Open the workstation IP, not 0.0.0.0. Source IP restrictions: '+(', '.join(config.allowed_clients) or 'NONE'),flush=True)

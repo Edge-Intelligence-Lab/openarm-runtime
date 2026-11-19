@@ -38,6 +38,25 @@ class SimulationBus:
             self.world.ff=[float((feedforward or {}).get(i,0.)) for i in range(1,9)]
         return self.world.feedback()
 
+    def gravity_feedforward(self):
+        with self.world.lock:
+            torques = dict.fromkeys(range(1, 9), 0.)
+            for name, (index, scale, _) in self.world.mapping.items():
+                dof = self.world.model.jnt_dofadr[self.world.joints[name]]
+                torques[index + 1] += scale * float(self.world.data.qfrc_bias[dof])
+            return torques
+
+    def start_hold(self, targets, kp, kd):
+        with self.world.lock:
+            self.preflight()
+            feedforward = self.gravity_feedforward()
+            self.command(1, 'enable')
+            try:
+                self.exchange(targets, kp, kd, feedforward)
+            except Exception:
+                self.command(1, 'disable')
+                raise
+
     def close(self):pass
 
 

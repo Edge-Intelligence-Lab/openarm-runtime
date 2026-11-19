@@ -81,3 +81,41 @@ or absent status visible. The overview camera is illustrative, not calibrated.
 Retain source-frame/waypoint identities with each derived image. Selecting the
 binding for simulation does not install it into a real robot or certify absolute
 accuracy, fixture rigidity, dynamic camera timing or both-arm geometry.
+
+## PICO 4 simulation teleoperation
+
+Start the existing MuJoCo platform with its simulation model and profile; install
+`.[platform,simulation,calibration,cartesian]`. The dashboard's **PICO 仿真遥操**
+opens `/simulation/teleop`. It uses the running scene and simulated left arm.
+
+The headset and the computer running MuJoCo need to be on a trusted LAN. Append
+these fields to the existing **simulation platform** JSON (alongside
+`simulation_profile`). Use the actual computer and headset IPv4 addresses.
+
+```json
+{
+  "host": "192.168.1.20",
+  "allowed_clients": ["192.168.1.21/32"],
+  "tls_cert": "certs/platform.pem",
+  "tls_key": "certs/platform-key.pem"
+}
+```
+
+The paths are resolved relative to the platform JSON. Use a certificate with the
+platform LAN IP in the subject alternative names and a chain trusted by the
+headset browser. Keep the key outside version control. With this example and the
+default port, open `https://192.168.1.20:8888/` in PICO Browser, select
+**PICO 仿真遥操**, then **进入 VR**. You can also open `/simulation/teleop` directly
+at that address. The headset shows the overview camera from the same scene.
+
+Face along the model's forward direction when starting the session. Press and
+hold the right grip button, then translate the controller. Forward, left and up
+in the WebXR reference frame map to forward, left and up in the robot base.
+The simulated tool moves at half the hand displacement, up to 15 cm per grip,
+with its starting orientation held by the Cartesian solver. Release the grip to
+stop and re-center before continuing. The grip must also be released after loss
+of tracking before following can resume. Exit VR to release the session.
+
+Only the writable simulation instance exposes the receiver. The page cannot
+control physical devices. A disconnected session releases the simulation arm;
+a busy arm cannot be acquired by a second session.
