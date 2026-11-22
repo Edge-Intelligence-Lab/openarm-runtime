@@ -38,6 +38,19 @@ class CartesianTests(unittest.TestCase):
         return DifferentialIK(self.chain, lower=[-1.8]*7, upper=[1.8]*7,
                               velocity=[.5]*7, posture=[.1]*7)
 
+    def test_pico_accepts_small_simulated_stop_penetration_only(self):
+        from math import radians
+        from openarm_simulation.pico import cartesian_start
+
+        reported = [.1] * 7
+        reported[5] = radians(45.12)
+        step = cartesian_start(self.chain, reported, 'right')
+        command = step(reported, (0., 0., 0.), (0., 0., 0.), .035)
+        self.assertLessEqual(command[5], radians(45))
+        reported[5] = radians(46)
+        with self.assertRaisesRegex(ValueError, 'J6'):
+            step(reported, (0., 0., 0.), (0., 0., 0.), .035)
+
     def test_no_jump_takeover_and_reclutch(self):
         from openarm_runtime.cartesian import RelativePose
         leader = self.chain.forward([.3]*7)

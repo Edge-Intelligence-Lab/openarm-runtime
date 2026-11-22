@@ -1,0 +1,16 @@
+{
+  "id": "/simulation/teleop",
+  "name": "OpenArm 遥操",
+  "short_name": "OpenArm",
+  "description": "PICO 双臂遥操 / PICO dual-arm teleoperation",
+  "lang": "zh-CN",
+  "start_url": "/simulation/teleop",
+  "scope": "/simulation/",
+  "display": "standalone",
+  "background_color": "#0c1519",
+  "theme_color": "#0c1519",
+  "icons": [
+    {"src": "/simulation/pico-icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/simulation/pico-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

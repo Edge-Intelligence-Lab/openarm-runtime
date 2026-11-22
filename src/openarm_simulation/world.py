@@ -5,12 +5,14 @@ grasp. Disabled/uncontrolled joints are supported at their last pose. These
 assumptions are recorded and shown in the UI; do not call this a calibrated twin.
 """
 import hashlib
+from contextlib import ExitStack
 import json
 import math
 from pathlib import Path
 import threading
 import time
 import uuid
+from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
 
@@ -18,8 +20,10 @@ def load_profile(path):
     path=Path(path).expanduser().resolve()
     data=json.loads(path.read_text())
     required={'schema','calibration_profile','geometry','output_root','initial_rad','cameras','tool_from_board','video_port'}
-    if not isinstance(data,dict) or required-set(data) or set(data)-required-{'board_contact_geoms'} or data['schema']!='openarm.simulation.v1':
+    if not isinstance(data,dict) or required-set(data) or set(data)-required-{'board_contact_geoms','pico_grasp'} or data['schema']!='openarm.simulation.v1':
         raise ValueError('Invalid explicit simulation profile')
+    if type(data.get('pico_grasp', False)) is not bool:
+        raise ValueError('pico_grasp must be a boolean')
     for key in ('calibration_profile','output_root'):
         data[key]=str((path.parent/Path(data[key]).expanduser()).resolve())
     data['geometry']['model_xml']=str((path.parent/Path(data['geometry']['model_xml']).expanduser()).resolve())
@@ -82,11 +86,19 @@ def build_model(setup,config,*,board_visual_mesh=False):
     if visual is None:visual=ET.SubElement(root,'visual')
     global_options=visual.find('global')
     if global_options is None:global_options=ET.SubElement(visual,'global')
-    global_options.set('offwidth',str(max(c['width'] for c in config['cameras'].values())))
-    global_options.set('offheight',str(max(c['height'] for c in config['cameras'].values())))
+    cameras = [(name, c['position_m'], c['target_m'], c['fovy_deg']) for name, c in config['cameras'].items()]
+    widths = [c['width'] for c in config['cameras'].values()]
+    heights = [c['height'] for c in config['cameras'].values()]
+    if config.get('pico_grasp'):
+        from .practice_scenes import CLOSEUP_HEIGHT, CLOSEUP_WIDTH, closeup_cameras
+        cameras.extend(closeup_cameras(config['cameras']['overview']))
+        widths.append(CLOSEUP_WIDTH)
+        heights.append(CLOSEUP_HEIGHT)
+    global_options.set('offwidth', str(max(widths)))
+    global_options.set('offheight', str(max(heights)))
     ET.SubElement(world,'light',pos='0 0 3',dir='0 0 -1',diffuse='.8 .8 .8',ambient='.4 .4 .4')
-    for name,c in config['cameras'].items():
-        position=np.array(c['position_m'],dtype=float);target=np.array(c['target_m'],dtype=float)
+    for name, camera_position, camera_target, fovy in cameras:
+        position=np.array(camera_position,dtype=float);target=np.array(camera_target,dtype=float)
         if position.shape!=(3,) or target.shape!=(3,) or not np.isfinite(position).all() or not np.isfinite(target).all():
             raise ValueError('Finite simulator camera placement required')
         forward=target-position;forward/=np.linalg.norm(forward)
@@ -94,7 +106,7 @@ def build_model(setup,config,*,board_visual_mesh=False):
         up=np.cross(right,forward)
         if not np.isfinite(right).all():raise ValueError('Camera look direction cannot be parallel to up')
         ET.SubElement(world,'camera',name='sim_'+name,pos=' '.join(map(str,position)),
-            xyaxes=' '.join(map(str,list(right)+list(up))),fovy=str(c['fovy_deg']))
+            xyaxes=' '.join(map(str,list(right)+list(up))),fovy=str(fovy))
     spec=setup['board_spec'];nx,ny=spec['squares_x'],spec['squares_y']
     w,h=nx*spec['square_size_m'],ny*spec['square_size_m']
     charuco=cv2.aruco.CharucoBoard((nx,ny),spec['square_size_m'],spec['marker_size_m'],
@@ -143,6 +155,9 @@ def build_model(setup,config,*,board_visual_mesh=False):
         if name not in available:raise ValueError('Board contacts must name tool/finger geometry')
         ET.SubElement(contacts,'pair',geom1='sim_board_spacer',geom2=name,condim='4',
                       friction='1 .01 .01 .001 .001',solref='.01 1')
+    if config.get('pico_grasp'):
+        from .grasp import add_practice_scene
+        add_practice_scene(root, world)
     model=mj.MjModel.from_xml_string(ET.tostring(root,encoding='unicode'),{'sim-charuco.png':png.tobytes()})
     return model
 
@@ -169,6 +184,22 @@ class SimulationWorld:
         self.targets=list(self.q);self.kp=[0.]*8;self.kd=[0.]*8;self.ff=[0.]*8;self.torques=[0.]*8
         self.limits=[20.,20.,9.,9.,3.,3.,3.,3.]
         self.lock=threading.RLock();self.lease=threading.Lock();self.stop=threading.Event()
+        self.arms = {'left': self}
+        if config.get('pico_grasp'):
+            from .grasp import initial_angles
+            self.q = initial_angles('left')
+            self.targets = list(self.q)
+            mapping = {f'openarm_right_joint{i+1}': (i, 1., 0.) for i in range(7)}
+            mapping.update({f'openarm_right_finger_joint{i}': (7, -1., 0.) for i in (1, 2)})
+            joints = {name: int(self.model.joint(name).id) for name in mapping}
+            for joint in joints.values():
+                self.fixed.pop(joint, None)
+            angles = initial_angles('right')
+            self.arms['right'] = SimpleNamespace(mapping=mapping, joints=joints, targets=list(angles),
+                enabled=False, lease=threading.Lock(), limits=self.limits, kp=[0.] * 8,
+                kd=[0.] * 8, ff=[0.] * 8, torques=[0.] * 8)
+            for name, (i, scale, offset) in mapping.items():
+                self.data.qpos[self.model.jnt_qposadr[joints[name]]] = scale * angles[i] + offset
         self.physics=None;self.error=None;self.steps=0;self.board_inserted=False
         self.board_geom=mj.mj_name2id(self.model,mj.mjtObj.mjOBJ_GEOM,'sim_board')
         self.spacer_geom=mj.mj_name2id(self.model,mj.mjtObj.mjOBJ_GEOM,'sim_board_spacer')
@@ -177,9 +208,13 @@ class SimulationWorld:
         self.board_position=self.model.geom_pos[self.board_geom].copy()
         self.model.geom_pos[self.board_geom]=[0.,0.,10.]
         self.source_id='mujoco-'+uuid.uuid4().hex
+        self.practice_scenes = None
+        if config.get('pico_grasp'):
+            from .practice_scenes import PracticeScenes
+            self.practice_scenes = PracticeScenes(self)
         self._set_pose(self.q)
         self.metadata=dict(simulation=True,engine='MuJoCo',version=mj.__version__,source_id=self.source_id,
-            geometry_sha256=collision['model_sha256'],active_sides=['left'],
+            geometry_sha256=collision['model_sha256'],active_sides=list(self.arms),
             scenario_sha256=hashlib.sha256(json.dumps(config,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
             cameras=config['cameras'],tool_from_board=config['tool_from_board'],
             gripper_transmission=collision['gripper_joints'],fixed_joints=collision['fixed_joints'],
@@ -195,13 +230,42 @@ class SimulationWorld:
         for j,value in self.fixed.items():self.data.qpos[self.model.jnt_qposadr[j]]=value
         self.mj.mj_forward(self.model,self.data)
 
-    def positions(self):
+    def positions(self, side='left'):
+        arm = self.arms[side]
         q=[[] for _ in range(8)];v=[[] for _ in range(8)]
-        for name,(i,scale,offset) in self.mapping.items():
-            j=self.joints[name]
+        for name,(i,scale,offset) in arm.mapping.items():
+            j=arm.joints[name]
             q[i].append((float(self.data.qpos[self.model.jnt_qposadr[j]])-offset)/scale)
             v[i].append(float(self.data.qvel[self.model.jnt_dofadr[j]])/scale)
         return [sum(a)/len(a) for a in q],[sum(a)/len(a) for a in v]
+
+    def reset_practice_arms(self, *, reset_objects=False, scene=None):
+        if self.practice_scenes is None:
+            return not reset_objects and scene is None
+        if scene is not None and scene not in self.practice_scenes.groups:
+            return False
+
+        from .grasp import initial_angles
+
+        with ExitStack() as locks, self.lock:
+            for arm in self.arms.values():
+                if not arm.lease.acquire(blocking=False):
+                    return False
+                locks.callback(arm.lease.release)
+            if any(arm.enabled for arm in self.arms.values()):
+                return False
+            for side, arm in self.arms.items():
+                angles = initial_angles(side)
+                arm.targets = list(angles)
+                for name, (i, scale, offset) in arm.mapping.items():
+                    joint = arm.joints[name]
+                    self.data.qpos[self.model.jnt_qposadr[joint]] = scale * angles[i] + offset
+                    self.data.qvel[self.model.jnt_dofadr[joint]] = 0.
+            if reset_objects or scene is not None:
+                self.practice_scenes.reset(scene or self.practice_scenes.current)
+                self.data.qacc_warmstart[:] = 0.
+            self.mj.mj_forward(self.model, self.data)
+            return True
 
     def start(self):
         if self.physics is not None:raise RuntimeError('Simulator already started')
@@ -213,21 +277,32 @@ class SimulationWorld:
             while not self.stop.is_set():
                 started=time.monotonic()
                 with self.lock:
-                    if self.enabled:
+                    if self.config.get('pico_grasp') or self.enabled:
+                        frozen = dict(self.fixed)
+                        for arm in self.arms.values():
+                            if not arm.enabled:
+                                arm.torques = [0.] * 8
+                                frozen.update({j: self.data.qpos[self.model.jnt_qposadr[j]]
+                                               for j in arm.joints.values()})
                         for _ in range(4):
-                            q,v=self.positions()
-                            tau=[max(-cap,min(cap,k*(goal-pos)-d*vel+ff)) for cap,k,d,goal,pos,vel,ff in
-                                 zip(self.limits,self.kp,self.kd,self.targets,q,v,self.ff)]
-                            self.torques=tau
                             self.data.qfrc_applied[:]=0.
-                            counts=[sum(value[0]==i for value in self.mapping.values()) for i in range(8)]
-                            for name,(i,scale,offset) in self.mapping.items():
-                                j=self.joints[name]
-                                self.data.qfrc_applied[self.model.jnt_dofadr[j]]=tau[i]/(scale*counts[i])
+                            for side, arm in self.arms.items():
+                                if not arm.enabled:
+                                    continue
+                                q,v=self.positions(side)
+                                tau=[max(-cap,min(cap,k*(goal-pos)-d*vel+ff)) for cap,k,d,goal,pos,vel,ff in
+                                     zip(arm.limits,arm.kp,arm.kd,arm.targets,q,v,arm.ff)]
+                                arm.torques=tau
+                                counts=[sum(value[0]==i for value in arm.mapping.values()) for i in range(8)]
+                                for name,(i,scale,offset) in arm.mapping.items():
+                                    j=arm.joints[name]
+                                    self.data.qfrc_applied[self.model.jnt_dofadr[j]]=tau[i]/(scale*counts[i])
                             self.mj.mj_step(self.model,self.data)
-                            for j,value in self.fixed.items():
+                            for j,value in frozen.items():
                                 self.data.qpos[self.model.jnt_qposadr[j]]=value
                                 self.data.qvel[self.model.jnt_dofadr[j]]=0.
+                            if self.practice_scenes is not None:
+                                self.practice_scenes.hold_inactive()
                             self.steps+=1
                         self.mj.mj_forward(self.model,self.data)
                         if not self.np.isfinite(self.data.qpos).all() or not self.np.isfinite(self.data.qvel).all():
@@ -236,14 +311,18 @@ class SimulationWorld:
                         self.data.qvel[:]=0.;self.torques=[0.]*8
                 self.stop.wait(max(0,.004-(time.monotonic()-started)))
         except BaseException as exc:
-            self.error=f'{type(exc).__name__}: {exc}';self.enabled=False;self.stop.set()
+            self.error=f'{type(exc).__name__}: {exc}'
+            for arm in self.arms.values():
+                arm.enabled = False
+            self.stop.set()
 
-    def feedback(self):
+    def feedback(self, side='left'):
         from openarm_runtime.telemetry import MotorState
         with self.lock:
             if self.error:raise RuntimeError(self.error)
-            q,v=self.positions();now=time.monotonic()
-            return {i:MotorState(i,q[i-1],v[i-1],self.torques[i-1],25,25,int(self.enabled),now)
+            arm = self.arms[side]
+            q,v=self.positions(side);now=time.monotonic()
+            return {i:MotorState(i,q[i-1],v[i-1],arm.torques[i-1],25,25,int(arm.enabled),now)
                     for i in range(1,9)}
 
     def close(self):
@@ -251,7 +330,8 @@ class SimulationWorld:
         if self.physics is not None:
             self.physics.join(5)
             if self.physics.is_alive():raise RuntimeError('Physics thread did not stop')
-        self.enabled=False
+        for arm in self.arms.values():
+            arm.enabled = False
 
     def insert_board(self):
         with self.lock:

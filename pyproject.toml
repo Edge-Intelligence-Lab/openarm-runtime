@@ -50,7 +50,7 @@ no-build-isolation-package = ["openarm-can"]
 [tool.setuptools.package-data]
 openarm_video = ["static/*.html", "static/*.js", "native/*.cpp"]
 
-openarm_platform = ["static/*.css", "static/*.js"]
+openarm_platform = ["static/*.css", "static/*.js", "static/*.html", "static/pico.webmanifest", "static/pico-icon-*.png"]
 
 openarm_runtime = ["calibration/*.json"]
 openarm_simulation = [

@@ -313,6 +313,8 @@ class Dashboard:
                     element = self.ui.element('iframe').props(
                         f'src={page.path or f"/apps/{page.id}/"} title="{page.label} · OpenArm" allowfullscreen'
                     ).classes('module-frame')
+                    if page.path == '/simulation/teleop' and not self.attach_only:
+                        element.props('allow="xr-spatial-tracking"')
                     self.identify(element, f'frame-{page.id}')
                 self.frames[self.active] = FrameView(element, generation)
         for name, frame in self.frames.items():

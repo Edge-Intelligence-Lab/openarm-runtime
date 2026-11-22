@@ -14,6 +14,7 @@ JOINT_VELOCITY_RAD_S = {1: 16.755, 2: 16.755, 3: 5.4454, 4: 5.4454,
 # The URDF/no-load ceiling is not an operating limit for this 20 Hz position
 # controller. High-speed operation needs validated trajectory/effort control.
 MAX_MANUAL_SPEED_DEG_S = 5.0
+RELATIVE_GRIPPER_LIMIT_DEG = 30.0
 
 
 def joint_bounds_deg(side):
@@ -25,6 +26,6 @@ def joint_bounds_deg(side):
             6: (-45.0, 45.0), 7: (-90.0, 90.0)}
 
 
-def manual_velocity_rad_s(mid, firmware_range):
-    # No calibrated gripper transmission: retain its existing 5 deg/s command cap.
-    return min(math.radians(MAX_MANUAL_SPEED_DEG_S), firmware_range)
+def manual_velocity_rad_s(mid, firmware_range, *, arm_speed_deg_s=MAX_MANUAL_SPEED_DEG_S):
+    speed = MAX_MANUAL_SPEED_DEG_S if mid == 8 else arm_speed_deg_s
+    return min(math.radians(speed), firmware_range)

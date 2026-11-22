@@ -4,9 +4,11 @@ from types import SimpleNamespace
 
 
 class SimulationBus:
-    def __init__(self,world):
+    def __init__(self,world,side='left'):
         from openarm_runtime.telemetry import MotorRange
         self.world=world
+        self.side=side
+        self.arm=world.arms[side]
         self.sdk=SimpleNamespace(__version__='simulation-'+world.metadata['version'])
         self.ranges={i:MotorRange(12.5,45. if i<3 else 30.,cap)
                      for i,cap in enumerate((54.,54.,28.,28.,10.,10.,10.,10.),1)}
@@ -14,29 +16,54 @@ class SimulationBus:
     def prepare_encoder(self,ids):
         if set(ids)!=set(range(1,9)):raise ValueError('Eight simulated motors required')
 
-    def state(self,mid):return self.world.feedback()[mid]
+    def state(self,mid):return self.world.feedback(self.side)[mid]
+
+    def position_snapshot(self):
+        with self.world.lock:
+            if self.world.error:
+                raise RuntimeError(self.world.error)
+            return self.world.positions(self.side)[0]
 
     def preflight(self):
-        states=self.world.feedback()
+        states=self.world.feedback(self.side)
         if any(s.status for s in states.values()):raise ValueError('Simulator already enabled; stop the current controller first')
         return {i:dict(state=asdict(s),range=asdict(self.ranges[i]),baud_code=4,simulation=True)
                 for i,s in states.items()}
 
     def command(self,mid,action,position=0.,kp=0.,kd=0.):
         with self.world.lock:
-            if action=='enable':self.world.enabled=True
-            elif action=='disable':self.world.enabled=False
+            if action=='enable':self.arm.enabled=True
+            elif action=='disable':self.arm.enabled=False
             elif action=='position':
-                self.world.targets[mid-1]=position;self.world.kp[mid-1]=kp;self.world.kd[mid-1]=kd
+                self.arm.targets[mid-1]=position;self.arm.kp[mid-1]=kp;self.arm.kd[mid-1]=kd
             else:raise ValueError('Unsupported simulation bus action')
 
     def exchange(self,targets,kp,kd,feedforward=None):
         with self.world.lock:
-            if not self.world.enabled:raise RuntimeError('Simulated motors are disabled')
-            self.world.targets=[float(targets[i]) for i in range(1,9)]
-            self.world.kp=list(kp);self.world.kd=list(kd)
-            self.world.ff=[float((feedforward or {}).get(i,0.)) for i in range(1,9)]
-        return self.world.feedback()
+            if not self.arm.enabled:raise RuntimeError('Simulated motors are disabled')
+            self.arm.targets=[float(targets[i]) for i in range(1,9)]
+            self.arm.kp=list(kp);self.arm.kd=list(kd)
+            self.arm.ff=[float((feedforward or {}).get(i,0.)) for i in range(1,9)]
+        return self.world.feedback(self.side)
+
+    def gravity_feedforward(self):
+        with self.world.lock:
+            torques = dict.fromkeys(range(1, 9), 0.)
+            for name, (index, scale, _) in self.arm.mapping.items():
+                dof = self.world.model.jnt_dofadr[self.arm.joints[name]]
+                torques[index + 1] += scale * float(self.world.data.qfrc_bias[dof])
+            return torques
+
+    def start_hold(self, targets, kp, kd):
+        with self.world.lock:
+            self.preflight()
+            feedforward = self.gravity_feedforward()
+            self.command(1, 'enable')
+            try:
+                self.exchange(targets, kp, kd, feedforward)
+            except Exception:
+                self.command(1, 'disable')
+                raise
 
     def close(self):pass
 
@@ -50,6 +77,9 @@ class SimulationCapture:
         self.world=world
         self.configs=tuple(CameraConfig(name,width=c['width'],height=c['height'],fps=c['fps'],
             calibration_identity='mujoco:'+world.metadata['geometry_sha256'][:16]+':'+name) for name,c in world.config['cameras'].items())
+        if world.practice_scenes is not None:
+            from .practice_scenes import CLOSEUP_FPS, CLOSEUP_HEIGHT, CLOSEUP_WIDTH
+            self.configs += (CameraConfig('closeup', width=CLOSEUP_WIDTH, height=CLOSEUP_HEIGHT, fps=CLOSEUP_FPS),)
         self.frames={};self.error='';self.thread=None
         import threading
         self.lock=threading.Lock();self.stop=threading.Event()
@@ -70,19 +100,29 @@ class SimulationCapture:
             data=mj.MjData(model)
             for c in self.configs:renderers[c.name]=mj.Renderer(model,c.height,c.width)
             options=mj.MjvOption();options.geomgroup[3]=0
-            count=0
+            due = dict.fromkeys((camera.name for camera in self.configs), time.monotonic())
+            sequences = dict.fromkeys(due, 0)
             while not self.stop.is_set():
-                started=time.monotonic();count+=1
                 for c in self.configs:
+                    started = time.monotonic()
+                    if started < due[c.name]:
+                        continue
+                    period = 1 / c.fps
+                    # Skip missed intervals instead of queuing frames the viewer will never see.
+                    due[c.name] += period * (int((started - due[c.name]) / period) + 1)
+                    sequences[c.name] += 1
                     with self.world.lock:
                         data.qpos[:]=self.world.data.qpos;data.qvel[:]=self.world.data.qvel
                         model.geom_pos[:]=self.world.model.geom_pos
                         model.geom_rgba[:]=self.world.model.geom_rgba
+                        camera_name = f'sim_{c.name}'
+                        if c.name == 'closeup':
+                            camera_name += f'_{self.world.practice_scenes.current}'
                         sim_time=float(self.world.data.time)
                         earliest=time.monotonic()
                     mj.mj_forward(model,data)
                     renderer=renderers[c.name]
-                    renderer.update_scene(data,camera='sim_'+c.name,scene_option=options)
+                    renderer.update_scene(data,camera=camera_name,scene_option=options)
                     rgb=renderer.render();latest=time.monotonic()
                     evidence=dict(simulation=True,source='MuJoCo offscreen render',simulation_time_s=sim_time,
                                   scenario_sha256=self.world.metadata['scenario_sha256'],
@@ -91,9 +131,9 @@ class SimulationCapture:
                         qualification='synthetic_test',qualification_evidence=evidence,
                         qualification_evidence_sha256=digest(evidence),earliest_s=earliest,latest_s=latest,
                         host_received_at_s=latest)
-                    frame=Frame(rgb[:,:,::-1].copy(),latest,count,'bgr8',self.world.source_id,acquisition)
+                    frame=Frame(rgb[:,:,::-1].copy(),latest,sequences[c.name],'bgr8',self.world.source_id,acquisition)
                     with self.lock:self.frames[c.name]=frame
-                self.stop.wait(max(0,1/min(c.fps for c in self.configs)-(time.monotonic()-started)))
+                self.stop.wait(max(0, min(due.values()) - time.monotonic()))
         except BaseException as exc:
             self.error=f'{type(exc).__name__}: {exc}'
         finally:
