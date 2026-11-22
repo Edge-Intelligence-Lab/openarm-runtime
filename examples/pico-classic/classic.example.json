@@ -1,0 +1,12 @@
+{
+  "format": "classic",
+  "bitrate": 1000000,
+  "left": "can1",
+  "right": "can0",
+  "mapping_verified": false,
+  "rate_hz": 20,
+  "feedback_timeout_s": 0.04,
+  "gravity": {
+    "right": "gravity-right.json"
+  }
+}

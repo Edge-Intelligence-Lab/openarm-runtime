@@ -23,6 +23,11 @@ The scene uses the bundled head camera calibration. Use
 Pass `--scene /path/to/scene.xml` to run your own MuJoCo scene.
 See [simulation](docs/simulation.md) for scene composition and platform integration.
 
+## PICO real-arm teleoperation
+
+The optional `pico-classic` command serves a single WebXR page for the Classic
+right arm. See the [PICO install and launch walkthrough](examples/pico-classic/README.md).
+
 ## Policy execution and gravity compensation
 
 The platform also provides **数采可视化** at `/#collection`: recording state,

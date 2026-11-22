@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PICO Classic right arm</title>
+<h1>PICO Classic right arm</h1>
+<label>Session token <input id="token" type="password" autocomplete="off"></label>
+<button id="start">Start</button>
+<button id="stop" disabled>Stop</button>
+<p id="status" role="status">Enter the session token to start.</p>
+<img id="camera" alt="Head camera" hidden>
+<script type="module">
+const start = document.querySelector("#start");
+const stop = document.querySelector("#stop");
+const status = document.querySelector("#status");
+const camera = document.querySelector("#camera");
+let active = null;
+const message = (text) => { status.textContent = text; };
+
+function cameraLayer(session) {
+  const gl = document.createElement("canvas").getContext("webgl", {xrCompatible: true, alpha: true});
+  const program = gl.createProgram();
+  for (const [type, source] of [
+    [gl.VERTEX_SHADER, "attribute vec2 p; varying vec2 uv; void main(){uv=p*.5+.5;gl_Position=vec4(p*vec2(.70,.42)+vec2(-.12,.08),0.,1.);}"],
+    [gl.FRAGMENT_SHADER, "precision mediump float; varying vec2 uv; uniform sampler2D image; void main(){gl_FragColor=texture2D(image,vec2(uv.x,1.-uv.y));}"],
+  ]) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error("Camera shader failed");
+    gl.attachShader(program, shader);
+  }
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error("Camera program failed");
+  gl.useProgram(program);
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const attribute = gl.getAttribLocation(program, "p");
+  gl.enableVertexAttribArray(attribute);
+  gl.vertexAttribPointer(attribute, 2, gl.FLOAT, false, 0, 0);
+  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+  for (const name of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) gl.texParameteri(gl.TEXTURE_2D, name, gl.CLAMP_TO_EDGE);
+  for (const name of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, name, gl.LINEAR);
+  const layer = new XRWebGLLayer(session, gl);
+  session.updateRenderState({baseLayer: layer});
+  return (viewer) => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (!viewer || !camera.naturalWidth) return;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, camera);
+    for (const view of viewer.views) {
+      const vp = layer.getViewport(view);
+      gl.viewport(vp.x, vp.y, vp.width, vp.height);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+  };
+}
+
+function finish(state, reason) {
+  if (active !== state) return;
+  active = null;
+  if (state.socket?.readyState === WebSocket.OPEN) state.socket.send("stop");
+  state.socket?.close();
+  state.session?.end().catch(() => {});
+  camera.removeAttribute("src");
+  camera.hidden = true;
+  stop.disabled = true;
+  start.disabled = false;
+  message(reason);
+}
+
+stop.onclick = () => { if (active) finish(active, "Stopped. Press Start for a new session."); };
+start.onclick = async () => {
+  const state = {};
+  active = state;
+  stop.disabled = false;
+  start.disabled = true;
+  try {
+    const session = await navigator.xr.requestSession("immersive-ar", {optionalFeatures: ["local-floor"]});
+    if (active !== state) {
+      await session.end();
+      return;
+    }
+    state.session = session;
+    session.addEventListener("end", () => finish(state, "Session ended. Press Start to follow again."));
+    const access = await fetch("/access", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({token: document.querySelector("#token").value})});
+    if (!access.ok) throw new Error("Session token rejected");
+    if ((await access.json()).camera && active === state) {
+      camera.src = "/video";
+      camera.hidden = false;
+    }
+    const space = await session.requestReferenceSpace("local-floor").catch(() => session.requestReferenceSpace("local"));
+    if (active !== state) return;
+    const render = cameraLayer(session);
+    const socket = new WebSocket("wss://" + location.host + "/input");
+    state.socket = socket;
+    let waiting = false;
+    let last = 0;
+    socket.onopen = () => socket.send("start");
+    socket.onmessage = (event) => {
+      if (event.data === "ok") {
+        waiting = false;
+        message("Input connected. Hold the right grip to follow.");
+      } else finish(state, JSON.parse(event.data).error || "Session stopped");
+    };
+    socket.onclose = () => finish(state, "Input disconnected. Press Start for a new session.");
+    function frame(now, xrFrame) {
+      if (active !== state) return;
+      try {
+        render(xrFrame.getViewerPose(space));
+        const right = [...session.inputSources].find((source) => source.handedness === "right");
+        const hand = right?.gripSpace ? xrFrame.getPose(right.gripSpace, space) : null;
+        if (hand && right.gamepad && socket.readyState === WebSocket.OPEN && !waiting && now - last >= 30) {
+          const {position: p, orientation: q} = hand.transform;
+          socket.send(JSON.stringify({pose: [p.x,p.y,p.z,q.x,q.y,q.z,q.w],
+            grip: Boolean(right.gamepad.buttons[1]?.pressed),
+            trigger: Boolean(right.gamepad.buttons[0]?.pressed), joystick_y: right.gamepad.axes[3] || 0}));
+          waiting = true;
+          last = now;
+        }
+        session.requestAnimationFrame(frame);
+      } catch (error) {
+        finish(state, error.message);
+      }
+    }
+    session.requestAnimationFrame(frame);
+  } catch (error) {
+    finish(state, error.message);
+  }
+};
+addEventListener("pagehide", () => { if (active) finish(active, "Page closed."); });
+</script>

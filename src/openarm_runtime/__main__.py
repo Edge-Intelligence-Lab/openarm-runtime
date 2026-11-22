@@ -97,6 +97,8 @@ def main():
     gravity_input.add_argument("--positions", type=float, nargs=8, metavar="RAD")
     gravity_input.add_argument("--episode", type=Path, help="Recorded policy episode for offline diagnosis")
     gravity.add_argument("--side", choices=("left", "right"), help="Required with --episode")
+    from .pico_classic import configure as configure_pico_classic
+    configure_pico_classic(commands.add_parser("pico-classic", help="Optional PICO real right-arm teleoperation"))
     platform = commands.add_parser("platform", help="OpenArm Platform: integrate existing control, teleop, tactile and vision pages")
     platform.add_argument("--profile", type=Path, help="External platform service configuration")
     platform.add_argument("--port", type=int, help="Override the platform port (default 8888)")
@@ -104,6 +106,10 @@ def main():
     from openarm_collection.cli import configure as configure_collection
     configure_collection(commands.add_parser("collection", help="Inspect, review and export demonstration episodes"))
     args = parser.parse_args()
+    if args.command == "pico-classic":
+        from .pico_classic import launch
+        launch(args)
+        return
     if args.command == "simulate":
         if args.steps < 0:
             parser.error("--steps must be nonnegative")
