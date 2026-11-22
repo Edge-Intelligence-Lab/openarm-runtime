@@ -103,7 +103,7 @@ class RuntimeTests(unittest.TestCase):
         result = subprocess.run([sys.executable, "-m", "openarm_runtime", "--help"],
                                 cwd=Path(__file__).resolve().parents[1],
                                 capture_output=True, text=True, check=True)
-        self.assertIn("prepare,leader,check,calibrate,view,panel", result.stdout)
+        self.assertIn("prepare,simulate,leader,check,calibrate,view,panel", result.stdout)
 
     def test_per_joint_sliders_bind_to_correct_motor(self):
         from openarm_runtime.panel import attach
