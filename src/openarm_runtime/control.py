@@ -26,7 +26,8 @@ def check_modes(bus, allow_unreadable=False, cancelled=_running):
         try:
             mode = bus.parameter(mid, 10)
         except TimeoutError:
-            if not allow_unreadable:
+            if not (allow_unreadable is True or
+                    isinstance(allow_unreadable, frozenset) and mid in allow_unreadable):
                 raise RuntimeError(f"ID{mid}: RID10 unreadable; explicit MIT trial required") from None
             mode = None
         if mode not in (None, 1):
@@ -36,15 +37,8 @@ def check_modes(bus, allow_unreadable=False, cancelled=_running):
 
 
 @contextmanager
-def hold_arm(profile, side, *, allow_unreadable_mode=False, cancelled=_running,
-             record=_ignore, publish=_ignore):
-    """Acquire bus, preflight, enable/hold, then disable and close on exit.
-
-    Entering this context enables the physical arm. Stop any reader using this bus
-    first. Call the yielded ArmHold.tick() from one thread at profile.rate_hz, using
-    offsets in degrees relative to the freshly captured enable pose. There is no
-    background loop here: the caller owns its schedule and stop signal.
-    """
+def prepare_arm(profile, side, *, allow_unreadable_mode=False, cancelled=_running, record=_ignore):
+    """Acquire and preflight the CAN bus while all motors are disabled."""
     if not profile.mapping_verified:
         raise ValueError("Confirm physical left/right mapping before control")
     interface = profile.interface(side)
@@ -58,7 +52,22 @@ def hold_arm(profile, side, *, allow_unreadable_mode=False, cancelled=_running,
             gravity = prepare_gravity(profile, side, bus, preflight)
             modes = check_modes(bus, allow_unreadable_mode, cancelled)
             record({"event": "modes", "readback": modes})
-            with ArmHold(bus, cancelled, record, publish, gravity=gravity) as arm:
-                yield arm
+            yield bus, gravity
         finally:
             bus.close()
+
+
+@contextmanager
+def hold_arm(profile, side, *, allow_unreadable_mode=False, cancelled=_running,
+             record=_ignore, publish=_ignore, manual_motion=False):
+    """Acquire bus, preflight, enable/hold, then disable and close on exit.
+
+    Stop readers on the selected bus before entering. Call ArmHold.tick() from
+    one thread at profile.rate_hz, with degree offsets from the enable pose.
+    Set manual_motion to share the manual panel's joint and trajectory bounds.
+    """
+    with prepare_arm(profile, side, allow_unreadable_mode=allow_unreadable_mode,
+                     cancelled=cancelled, record=record) as (bus, gravity):
+        with ArmHold(bus, cancelled, record, publish, gravity=gravity,
+                     manual_side=side if manual_motion else None) as arm:
+            yield arm

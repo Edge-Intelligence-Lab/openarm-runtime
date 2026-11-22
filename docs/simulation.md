@@ -86,7 +86,13 @@ accuracy, fixture rigidity, dynamic camera timing or both-arm geometry.
 
 Start the existing MuJoCo platform with its simulation model and profile; install
 `.[platform,simulation,calibration,cartesian]`. The dashboard's **PICO 仿真遥操**
-opens `/simulation/teleop`. It uses the running scene and simulated left arm.
+opens `/simulation/teleop`. The simulation page at `/simulation/practice` uses
+the running scene and simulated arm.
+
+Set `OPENARM_PICO_OFFICIAL_SIM_URL` to the HTTPS URL of a running
+[Enactic WebXR + MuJoCo dataflow](https://docs.openarm.dev/tutorial/data-collection-webxr/)
+to point the simulation entry at the official headset page. The headset must
+also be able to reach the WebRTC media endpoint or its TURN relay.
 
 The headset and the computer running MuJoCo need to be on a trusted LAN. Append
 these fields to the existing **simulation platform** JSON (alongside
@@ -105,16 +111,63 @@ The paths are resolved relative to the platform JSON. Use a certificate with the
 platform LAN IP in the subject alternative names and a chain trusted by the
 headset browser. Keep the key outside version control. With this example and the
 default port, open `https://192.168.1.20:8888/` in PICO Browser, select
-**PICO 仿真遥操**, then **进入 VR**. You can also open `/simulation/teleop` directly
-at that address. The headset shows the overview camera from the same scene.
+**PICO 仿真遥操**, select **仿真** if prompted, then **进入 VR**. You can also open
+`/simulation/practice` directly. The browser preview and immersive view show the overview as the
+main view and the simulated head camera as a smaller view beside it.
+Tap either controller's side grip to cycle the main view. Grasp practice adds a
+task close-up as the second view in the cycle, between the overview and the
+head camera. Its framing changes with the selected scene. In grasp practice,
+hold the side grip for about 1.2 seconds to reset the arms
+and objects and reload the teleoperation page. The browser toolbar also offers
+a Reset practice button.
+Both camera viewpoints are fixed. The browser subtracts the headset's position
+from each controller position locally, so a translation of the headset and hands
+together does not move the simulated arms. Face forward as you enter VR. The
+browser uses that heading to align controller movement and wrist rotation with
+the simulation. Turning your head or swapping camera views leaves the heading
+fixed. If the headset recenters its tracking space, face forward again while
+the arms realign.
 
-Face along the model's forward direction when starting the session. Press and
-hold the right grip button, then translate the controller. Forward, left and up
-in the WebXR reference frame map to forward, left and up in the robot base.
-The simulated tool moves at half the hand displacement, up to 15 cm per grip,
-with its starting orientation held by the Cartesian solver. Release the grip to
-stop and re-center before continuing. The grip must also be released after loss
-of tracking before following can resume. Exit VR to release the session.
+On a shared PICO, open the teleoperation URL once and use PICO Browser's
+Add as Web App action to save a launcher entry for later users. The icon opens
+the same HTTPS address, so it still needs a valid certificate and network access.
+
+Face forward and lower both controllers to your sides when starting the session.
+Keep them steady until the two-second countdown ends, then move or rotate them
+to control the simulated arms.
+Left and right follow the overview image,
+forward goes into the scene on the horizontal plane, and up follows world up.
+The Cartesian solver targets the same displacement and rotation as the controller,
+up to 15 cm and 60 degrees from alignment. Joint limits and the reachable
+workspace can constrain the result. Loss of tracking pauses following until the
+controller is tracked and held steady again. Exit VR to stop the session.
+
+For OpenArm V2 grasp practice, set `"pico_grasp": true` in the simulation profile.
+This starts both arms over a table with two movable wooden blocks. Each controller
+drives its matching arm. The arms reset to a relaxed hanging pose at the start
+of a new session. Push the thumbstick forward to open the fingers or back to
+close them. Centering the thumbstick retains the last gripper setting. The
+practice scene uses simplified contact pads on each jaw.
+The practice profile allows up to 28 cm of target travel and includes a central
+beam with a grasp point at either end. When both jaws on both arms contact the
+beam with both grippers closed, the two arms follow the average translation and
+keep their relative position and wrist orientations. Opening either gripper
+returns the arms to independent control. The two individual blocks remain available.
+
+Before entering VR, use **选择场景 / Choose scene** to select the wood practice,
+a fallen cylinder with a pedestal, a tube and hollow socket, or a key with a
+rotating slotted plug.
+Switching scenes resets the props and arm poses. The reset button restores the
+current task. The tube and key use simplified collision geometry with openings
+and are not dimensioned replicas of any physical training fixtures.
+
+The practice page shows both arms' joint angles, jaw opening in degrees, and
+simulated grip force in newtons. The browser panel also shows the tool center
+in world coordinates. The grip force is the smaller of the two jaws' summed
+normal contact forces on the same object, so free motion and one-sided
+touches read zero. The optional CSV records both arms at roughly 5 Hz, including
+joint velocities, scene ID and TCP coordinates. Stop and download the recording before
+refreshing or resetting the page.
 
 Only the writable simulation instance exposes the receiver. The page cannot
 control physical devices. A disconnected session releases the simulation arm;

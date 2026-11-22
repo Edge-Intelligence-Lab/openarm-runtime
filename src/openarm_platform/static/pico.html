@@ -3,23 +3,170 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PICO 仿真遥操 · OpenArm</title>
+  <meta name="theme-color" content="#0c1519">
+  <link rel="manifest" href="/simulation/pico.webmanifest">
+  <link rel="icon" href="/simulation/pico-icon-192.png" sizes="192x192" type="image/png">
+  <title>OpenArm 仿真遥操 · Simulation Teleoperation</title>
   <style>
-    body {font: 1rem/1.5 system-ui,sans-serif; margin: auto; padding: 1.25rem; max-width: 52rem; color: #15271e; background: #f6f8f6;}
-    h1 {font-size: 1.4rem;}
-    button {font: inherit; padding: .45rem .8rem; cursor: pointer;}
+    :root {
+      color-scheme: dark;
+      --page: #0c1519;
+      --panel: #132227;
+      --line: #30474e;
+      --text: #edf5f4;
+      --muted: #a8bfc2;
+      --teal: #81e0c9;
+      --amber: #f5ba75;
+    }
+    * {box-sizing: border-box;}
+    body {margin: 0; background: var(--page); color: var(--text); font: 1rem/1.55 system-ui, sans-serif;}
+    main {max-width: 76rem; margin: auto; padding: clamp(1rem, 4vw, 3rem);}
+    h1, h2, p {margin: 0;}
+    h1 {font-size: clamp(1.75rem, 4vw, 2.65rem); line-height: 1.2; letter-spacing: -.025em;}
+    h2 {font-size: 1rem;}
+    .sub {display: block; color: var(--muted); font-size: .78rem; font-weight: 500;}
+    .heading .sub {margin-top: .35rem; font-size: 1rem;}
+    .toolbar {display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; margin: 1.1rem 0;}
+    button {border: 1px solid var(--line); border-radius: .5rem; padding: .45rem .8rem;
+            background: var(--panel); color: var(--text); font: inherit; text-align: left; cursor: pointer;}
+    button:focus-visible {outline: 2px solid var(--amber); outline-offset: 3px;}
+    button:disabled {opacity: .53; cursor: default;}
+    .primary {background: var(--teal); border-color: var(--teal); color: #0b1c1c; font-weight: 700;}
+    .primary .sub {color: #234743;}
+    .home-link {display: inline-block; color: var(--teal); font-size: .88rem; margin-bottom: .65rem;}
+    #status {border-left: 2px solid var(--teal); min-height: 2.55rem; padding-left: .7rem; font-size: .9rem;}
+    #status[data-state="warning"] {border-color: var(--amber);}
+    .cameras {display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr);
+              grid-template-areas: "overview head" "overview help"; grid-template-rows: auto 1fr;
+              align-items: start; gap: .9rem;}
+    figure {margin: 0; min-width: 0; overflow: hidden; border: 1px solid var(--line);
+            border-radius: .8rem; background: var(--panel);}
+    .overview {grid-area: overview; border-top: 3px solid var(--teal);}
+    .head {grid-area: head; border-top: 3px solid var(--amber);}
+    .closeup {display: none; grid-area: closeup; border-top: 3px solid #aabaff;}
+    .practice .closeup {display: block;}
+    .practice .cameras {grid-template-areas: "overview closeup" "overview head" "help help";
+                        grid-template-rows: auto auto auto;}
+    figcaption {display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .65rem;
+                padding: .55rem .8rem; font-weight: 650;}
+    img {display: block; width: 100%; aspect-ratio: 4/3; object-fit: contain; background: #090f12;}
+    .instructions {grid-area: help; display: grid; gap: .9rem; min-width: 0;}
+    .instructions section {border-top: 1px solid var(--line); padding-top: .65rem;}
+    .instructions p {margin-top: .35rem; font-size: .88rem;}
+    .telemetry {margin-top: 1rem; padding: .85rem; border: 1px solid var(--line);
+                border-radius: .8rem; background: var(--panel);}
+    .telemetry-header {display: flex; flex-wrap: wrap; align-items: center; gap: .65rem;}
+    .telemetry-header h2 {flex: 1;}
+    .telemetry-state {color: var(--muted); font-size: .82rem;}
+    .telemetry-scroll {overflow-x: auto; margin-top: .65rem;}
+    .telemetry table {width: 100%; border-collapse: collapse; white-space: nowrap;
+                      font-variant-numeric: tabular-nums; font-size: .82rem;}
+    .telemetry th, .telemetry td {text-align: right; padding: .36rem; border-bottom: 1px solid var(--line);}
+    .telemetry th:first-child {text-align: left;}
+    .telemetry .note {color: var(--muted); font-size: .8rem; margin-top: .55rem;}
+    dialog {width: min(31rem, calc(100vw - 2rem)); border: 1px solid var(--line);
+            border-radius: .75rem; padding: 1.4rem; background: var(--panel); color: var(--text);}
+    dialog::backdrop {background: #081012be;}
+    dialog h2 {font-size: 1.25rem;}
+    dialog p {margin: .9rem 0;}
+    dialog form {display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .6rem;}
+    #scene-dialog {width: min(39rem, calc(100vw - 2rem));}
+    .scene-list {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; margin: 1rem 0;}
+    .scene-list button {padding: .65rem .8rem;}
+    .scene-list button[aria-pressed="true"] {border-color: var(--teal); background: #213b3a;}
+    #scene-feedback:empty {display: none;}
+    #scene-feedback {color: var(--amber); margin: .5rem 0;}
     canvas {display: none;}
-    img {display: block; width: 100%; max-height: 58vh; object-fit: contain; background: #151c19;}
+    @media (max-width: 40rem) {
+      figcaption {display: block;}
+      .cameras {grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+                grid-template-areas: "overview head" "help help"; gap: .65rem;}
+    }
+    @media (max-width: 25rem) {
+      .cameras {grid-template-columns: minmax(0, 1fr); grid-template-areas: "overview" "head" "help";}
+      .practice .cameras {grid-template-areas: "overview" "closeup" "head" "help";}
+      .head {width: 65%; justify-self: end;}
+      #status {flex-basis: 100%;}
+      .scene-list {grid-template-columns: 1fr;}
+    }
   </style>
-  <script src="/simulation/pico.js" defer></script>
+  <script src="/simulation/pico-telemetry.js?v=2" defer></script>
+  <script src="/simulation/pico.js?v=simulation-only" defer></script>
 </head>
 <body>
-  <h1>PICO 仿真遥操</h1>
-  <p>按住右手柄握键移动左臂末端，松开即停止跟随。</p>
-  <button id="enter" disabled>进入 VR</button>
-  <button id="stop" disabled>退出 VR</button>
-  <p id="status" role="status">正在检查 WebXR…</p>
-  <img id="preview" alt="MuJoCo 仿真场景">
-  <canvas id="xr" aria-hidden="true"></canvas>
+  <main>
+    <header class="heading">
+      <!-- home-entry -->
+      <h1>OpenArm 仿真遥操</h1>
+      <span class="sub" lang="en">Simulation Teleoperation</span>
+    </header>
+    <div class="toolbar">
+      <button id="choose-scene">选择场景 / Choose scene<span class="sub" id="current-scene">木块与木条 / Blocks &amp; beam</span></button>
+      <button id="enter" class="primary" disabled>进入 VR<span class="sub" lang="en">Enter VR</span></button>
+      <button id="stop" disabled>退出 VR<span class="sub" lang="en">Exit VR</span></button>
+      <button id="reset-scene">重置练习<span class="sub" lang="en">Reset practice</span></button>
+      <p id="status" role="status"><span id="status-zh">正在检查 WebXR…</span><span id="status-en" class="sub" lang="en">Checking WebXR…</span></p>
+    </div>
+    <div class="cameras">
+      <figure class="overview"><figcaption><span id="overview-zh">全景</span><span id="overview-en" class="sub" lang="en">Overview</span></figcaption><img id="overview" alt="OpenArm 仿真全景 / OpenArm simulation overview"></figure>
+      <figure class="closeup"><figcaption><span id="closeup-zh">操作近景</span><span id="closeup-en" class="sub" lang="en">Task Close-up</span></figcaption><img id="closeup-camera" alt="练习物体与操作区域 / Practice objects and work area"></figure>
+      <figure class="head"><figcaption><span id="head-zh">头部相机</span><span id="head-en" class="sub" lang="en">Head Camera</span></figcaption><img id="head-camera" alt="OpenArm 仿真头部相机 / OpenArm simulated head camera"></figure>
+      <div class="instructions">
+        <section>
+          <h2>手柄操作 <span class="sub" lang="en">Controller controls</span></h2>
+          <p>机械臂自动跟随同侧手柄。拇指摇杆前推张开夹爪，后推闭合，回中保持。<span class="sub" lang="en">Each arm follows its controller. Push the thumbstick forward to open the gripper or back to close it. Center holds the last setting.</span></p>
+          <p>短按任一侧面握把键切换大窗视角，长按约 1.2 秒重置练习。<span class="sub" lang="en">Tap either side grip to switch the main view. Hold it for about 1.2 seconds to reset.</span></p>
+        </section>
+        <section>
+          <h2>场景目标 <span class="sub" lang="en">Task goal</span></h2>
+          <p data-scene-guide="wood">夹住中央木条两端的橙色抓块，再一起抬。<span class="sub" lang="en">Grip both orange handles on the beam and lift together.</span></p>
+          <p data-scene-guide="cylinder" hidden>夹住横躺的圆柱，转成竖直，再立到蓝色底座上。<span class="sub" lang="en">Pick up the fallen cylinder, turn it upright, and stand it on the blue pedestal.</span></p>
+          <p data-scene-guide="tube" hidden>夹起浅蓝色管子，对准深色套筒的圆孔，从上往下插入。<span class="sub" lang="en">Lift the light-blue tube, align it with the dark socket, and lower it into the hole.</span></p>
+          <p data-scene-guide="key" hidden>夹起橙色钥匙头，把钥匙插入锁孔，再转动手腕。<span class="sub" lang="en">Grip the orange key head, insert the blade in the slot, then turn your wrist.</span></p>
+        </section>
+      </div>
+    </div>
+    <section class="telemetry" aria-labelledby="telemetry-title">
+      <div class="telemetry-header">
+        <h2 id="telemetry-title">实时仿真数据 <span class="sub" lang="en">Live simulation telemetry</span></h2>
+        <p id="telemetry-state" class="telemetry-state">等待数据 / Waiting for data</p>
+        <button id="record-telemetry" disabled aria-pressed="false"><span>开始采集</span><span class="sub" lang="en">Record CSV</span></button>
+      </div>
+      <div class="telemetry-scroll">
+        <table>
+          <thead><tr><th scope="col">机械臂 / Arm</th>
+            <th scope="col">J1 °</th><th scope="col">J2 °</th><th scope="col">J3 °</th><th scope="col">J4 °</th>
+            <th scope="col">J5 °</th><th scope="col">J6 °</th><th scope="col">J7 °</th>
+            <th scope="col">开合° / Jaw</th><th scope="col">夹持力 N / Grip</th><th scope="col">末端 XYZ cm / TCP</th>
+          </tr></thead>
+          <tbody>
+            <tr id="telemetry-left"><th scope="row">左 / L</th><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+            <tr id="telemetry-right"><th scope="row">右 / R</th><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">开合角以闭合为 0°。夹持力为双指作用在同一物体上的仿真接触力。采集后先下载 CSV，再刷新或重置。<span class="sub" lang="en">Jaw angle is zero when closed. Grip force is simulated contact on a shared object. Download the CSV before reloading or resetting.</span></p>
+    </section>
+    <dialog id="scene-dialog" aria-labelledby="scene-title">
+      <h2 id="scene-title">选择练习场景 <span class="sub" lang="en">Choose a practice scene</span></h2>
+      <div class="scene-list">
+        <button type="button" data-scene="cylinder" aria-pressed="false"><span>扶正圆柱</span><span class="sub" lang="en">Stand a cylinder upright</span></button>
+        <button type="button" data-scene="tube" aria-pressed="false"><span>插入管子</span><span class="sub" lang="en">Insert a tube</span></button>
+        <button type="button" data-scene="key" aria-pressed="false"><span>插入并旋转钥匙</span><span class="sub" lang="en">Insert and turn a key</span></button>
+        <button type="button" data-scene="wood" aria-pressed="true"><span>木块与木条</span><span class="sub" lang="en">Blocks &amp; beam</span></button>
+      </div>
+      <p id="scene-feedback" role="status"></p>
+      <form method="dialog"><button>返回 <span class="sub" lang="en">Back</span></button></form>
+    </dialog>
+    <dialog id="start-position" aria-labelledby="start-title">
+      <h2 id="start-title">从双手自然下垂开始 <span class="sub" lang="en">Start with your hands at your sides</span></h2>
+      <p>进入 VR 时面朝正前方，双手自然垂在身侧，等两秒倒计时结束后再动。<span class="sub" lang="en">As you enter VR, face forward with your hands at your sides. Keep still until the two-second countdown ends.</span></p>
+      <form method="dialog">
+        <button value="cancel">取消<span class="sub" lang="en">Cancel</span></button>
+        <button id="start-follow" class="primary" type="button">进入并对齐<span class="sub" lang="en">Enter &amp; Align</span></button>
+      </form>
+    </dialog>
+    <canvas id="xr" aria-hidden="true"></canvas>
+  </main>
 </body>
 </html>

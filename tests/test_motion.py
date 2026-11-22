@@ -12,6 +12,91 @@ from openarm_runtime.telemetry import IDS
 
 
 class MotionTests(unittest.TestCase):
+    def test_streaming_waits_for_lagging_joint_without_ending_the_session(self):
+        lead = math.radians(2) - 1e-9
+        dt = .05
+        motion = SmoothMotion(dict.fromkeys(IDS, (-90, 90)), max_speed_deg_s=30.)
+        motion.initialize(dict.fromkeys(IDS, 0.))
+        mid = 6
+        feedback = 0.
+        for _ in range(90):
+            goals = dict.fromkeys(IDS, 0.) | {mid: feedback + lead}
+            feedback = motion.step(goals, 30., dt, tracking_positions_rad={mid: feedback})[mid]
+        stalled_feedback = feedback
+        goals[mid] = stalled_feedback + lead
+        for _ in range(20):
+            command = motion.step(goals, 30., dt, tracking_positions_rad={mid: stalled_feedback})[mid]
+            self.assertLessEqual(abs(command - stalled_feedback), lead + 1e-10)
+        self.assertAlmostEqual(motion.velocities[mid], 0.)
+        feedback = command
+        for _ in range(20):
+            goals[mid] = feedback + lead
+            feedback = motion.step(goals, 30., dt, tracking_positions_rad={mid: feedback})[mid]
+        self.assertGreater(feedback, command)
+
+    def test_streaming_brakes_on_reversal_with_delayed_feedback(self):
+        lead = math.radians(2) - 1e-9
+        dt = .05
+        motion = SmoothMotion(dict.fromkeys(IDS, (-90, 90)), max_speed_deg_s=30.)
+        motion.initialize(dict.fromkeys(IDS, 0.))
+        history = [0., 0.]
+        peak_speed = 0.
+        for tick in range(240):
+            measured = history[-2]
+            previous_q = history[-1]
+            previous_v = motion.velocities[1]
+            target = measured + (lead if tick < 120 else -lead)
+            sent = motion.step(dict.fromkeys(IDS, 0.) | {1: target}, 30., dt,
+                               tracking_positions_rad={1: measured})[1]
+            velocity = (sent - previous_q) / dt
+            peak_speed = max(peak_speed, abs(velocity))
+            self.assertLessEqual(abs(sent - measured), lead + 1e-10)
+            self.assertLessEqual(abs(velocity - previous_v), math.radians(10) * dt + 1e-10)
+            history.append(sent)
+        self.assertGreater(math.degrees(peak_speed), 10.)
+        self.assertLessEqual(math.degrees(peak_speed), 30.)
+        self.assertLess(motion.velocities[1], 0.)
+
+    def test_streaming_holds_last_arm_command_while_gripper_moves(self):
+        bus = FakeBus()
+        joints = range(1, 8)
+        with patch('openarm_runtime.arm.time.sleep'):
+            with ArmHold(bus, lambda: False, Mock(), Mock(), manual_side='right',
+                         manual_arm_speed_deg_s=30.) as arm:
+                for _ in range(40):
+                    offsets = {mid: math.degrees(angle) + 1.99 for mid, angle in arm.targets.items()}
+                    offsets[8] = 0.
+                    arm.tick(offsets, 30., .05, streaming_joints=joints)
+                before = dict(arm.targets)
+                self.assertGreater(arm.motion.velocities[1], 0.)
+                arm.tick(dict.fromkeys(IDS, 0.) | {8: 10.}, 30., .05, hold_joints=joints)
+                self.assertTrue(all(arm.targets[mid] == before[mid] for mid in joints))
+                self.assertTrue(all(arm.motion.velocities[mid] == 0. for mid in joints))
+                self.assertGreater(arm.targets[8], before[8])
+
+    def test_custom_speed_cap_applies_to_arm_commands_but_not_gripper(self):
+        arm_speed_deg_s = 30.0
+
+        bus = FakeBus()
+        bus.ranges[3] = replace(bus.ranges[3], velocity=math.radians(15))
+        bus.positions.update({5: math.radians(-20), 6: math.radians(-44), 7: math.radians(-20)})
+        offsets = {1: 100., 2: 100., 3: 80., 4: 100., 5: 100., 6: 88., 7: 100., 8: 30.}
+        peak = dict.fromkeys(IDS, 0.0)
+        with patch('openarm_runtime.arm.time.sleep'):
+            with ArmHold(bus, lambda: False, Mock(), Mock(), manual_side='right',
+                         manual_arm_speed_deg_s=arm_speed_deg_s) as arm:
+                self.assertEqual(arm.motion.metadata()['speed_cap_deg_s'], 30.0)
+                for _ in range(160):
+                    before = dict(arm.targets)
+                    arm.tick(offsets, arm_speed_deg_s, .05)
+                    for mid in IDS:
+                        speed = abs(math.degrees(bus.last_targets[mid] - before[mid])) / .05
+                        peak[mid] = max(peak[mid], speed)
+        for mid in IDS:
+            expected = {3: 15., 8: 5.}.get(mid, 30.)
+            self.assertLessEqual(peak[mid], expected + 1e-9)
+            self.assertGreater(peak[mid], 29. if mid == 6 else expected - 1e-9)
+
     def motion(self, base=None):
         motion = SmoothMotion(dict.fromkeys(IDS, (-90, 90)))
         motion.initialize(base or dict.fromkeys(IDS, 0.0))

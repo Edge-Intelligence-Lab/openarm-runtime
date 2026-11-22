@@ -8,7 +8,7 @@ import time
 from .telemetry import IDS
 from .config import finite
 from .motion import SmoothMotion
-from .limits import joint_bounds_deg, manual_velocity_rad_s, MAX_MANUAL_SPEED_DEG_S
+from .limits import RELATIVE_GRIPPER_LIMIT_DEG, joint_bounds_deg, manual_velocity_rad_s, MAX_MANUAL_SPEED_DEG_S
 
 # J1–J7: Enactic openarm_description OpenArm v2 control_gains.yaml.
 # J8 is not specified upstream; retain the existing gripper gains.
@@ -17,7 +17,8 @@ FOLLOWER_KD = (2.75, 2.5, 2.0, 2.0, 0.7, 0.6, 0.5, 0.3)
 
 
 class ArmHold:
-    def __init__(self, bus, cancelled, record, publish, *, tracking=False, manual_side=None, gravity=None, observe=None, integral=None):
+    def __init__(self, bus, cancelled, record, publish, *, tracking=False, manual_side=None, gravity=None,
+                 observe=None, integral=None, manual_arm_speed_deg_s=MAX_MANUAL_SPEED_DEG_S):
         self.bus, self.cancelled, self.record, self.publish = bus, cancelled, record, publish
         self.tracking = tracking
         self.gravity = gravity
@@ -29,7 +30,9 @@ class ArmHold:
         self.manual_bounds = joint_bounds_deg(manual_side) if manual_side is not None else None
         self.motion = None
         if manual_side is not None:
-            self.motion = SmoothMotion(joint_bounds_deg(manual_side) | {8: (-30, 30)}, relative_gripper=True)
+            self.motion = SmoothMotion(self.manual_bounds | {
+                8: (-RELATIVE_GRIPPER_LIMIT_DEG, RELATIVE_GRIPPER_LIMIT_DEG)}, relative_gripper=True,
+                max_speed_deg_s=manual_arm_speed_deg_s)
         self.trace = deque(maxlen=200)
         self.attempted = []
         self.states = {}
@@ -152,9 +155,13 @@ class ArmHold:
         self.attempted.clear()
         return errors
 
-    def tick(self, offsets, speed, period, gain_scale=1):
+    def manual_joint_velocity_rad_s(self, mid):
+        return manual_velocity_rad_s(mid, self.bus.ranges[mid].velocity,
+                                     arm_speed_deg_s=self.motion.max_speed_deg_s)
+
+    def tick(self, offsets, speed, period, gain_scale=1, *, streaming_joints=(), hold_joints=()):
         self.check_cancelled()
-        finite(speed, 0.1, MAX_MANUAL_SPEED_DEG_S if self.manual_bounds is not None else 5, "speed_deg_s")
+        finite(speed, 0.1, self.motion.max_speed_deg_s if self.motion else 5, "speed_deg_s")
         finite(period, 0.02, 0.1, "period_s")
         finite(gain_scale, 0, 1, "gain_scale")
         if set(offsets) != set(IDS):
@@ -164,6 +171,7 @@ class ArmHold:
         step = math.radians(speed) * period
         targets = {}
         goals = {}
+        joint_velocity = {mid: self.manual_joint_velocity_rad_s(mid) for mid in IDS} if self.motion else {}
         for mid in IDS:
             self.validate(self.states[mid])
             if self.manual_bounds is not None and mid in self.manual_bounds:
@@ -176,14 +184,15 @@ class ArmHold:
                 else:
                     offset = finite(offsets[mid], lower-base_deg, upper-base_deg, "offset_deg")
             else:
-                offset = finite(offsets[mid], -30, 30, "offset_deg")
+                offset_limit = RELATIVE_GRIPPER_LIMIT_DEG if mid == 8 else 30
+                offset = finite(offsets[mid], -offset_limit, offset_limit, "offset_deg")
             goal = self.base[mid] + math.radians(offset)
             if abs(goal) >= self.bus.ranges[mid].position:
                 raise ValueError(f"ID{mid}: target outside firmware range")
             goals[mid] = goal
             joint_step = step
-            if self.manual_bounds is not None:
-                joint_step = min(step, manual_velocity_rad_s(mid, self.bus.ranges[mid].velocity) * period)
+            if self.motion:
+                joint_step = min(step, joint_velocity[mid] * period)
             q = self.targets[mid] + max(-joint_step, min(joint_step, goal - self.targets[mid]))
             state = self.states[mid]
             effort = kp[mid - 1] * (q - state.position) - kd[mid - 1] * state.velocity
@@ -191,7 +200,9 @@ class ArmHold:
                 raise RuntimeError(f"ID{mid}: predicted effort near firmware range; error={math.degrees(q-state.position):.2f}°")
             targets[mid] = q
         if self.motion:
-            targets = self.motion.step(goals, speed, period)
+            tracking = {mid: self.states[mid].position for mid in streaming_joints}
+            targets = self.motion.step(goals, speed, period, joint_velocity_rad_s=joint_velocity,
+                                       tracking_positions_rad=tracking, hold_joints=hold_joints)
         self._exchange(targets, kp, kd)
 
     def track(self, targets):

@@ -189,7 +189,8 @@ class DifferentialIK:
         self.task.set_target(desired * self.chain.tcp.inverse())
         started = time.perf_counter()
         velocity = pink.solve_ik(self.configuration, [self.task, self.posture], dt,
-                                 solver="daqp", damping=1e-6, barriers=self.barriers)
+                                 solver="daqp", damping=1e-6, barriers=self.barriers,
+                                 primal_tol=1e-9)
         q = pin.integrate(self.model, self.configuration.q, velocity * dt)
         command = (q[self.chain.indices] - self.chain.offsets) * self.chain.signs
         if (not np.isfinite(command).all()
