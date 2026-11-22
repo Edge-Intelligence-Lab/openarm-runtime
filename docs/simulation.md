@@ -1,4 +1,61 @@
-# Passive MuJoCo backend
+# MuJoCo simulation
+
+Install the simulation extra with Python 3.12. From the repository root:
+
+```sh
+python -m pip install '.[simulation]'
+openarm-runtime simulate --steps 100
+openarm-runtime simulate --view
+```
+
+The headless command prints a JSON summary after stepping physics. Use
+`--steps 0` to compile the scene and run forward kinematics only. The interactive
+viewer requires a desktop graphics session and uses MuJoCo's actuator controls.
+The bundled scene contains the OpenArm v2 dual-arm robot, floor, light and
+overview camera, and a `calibrated_head` camera. Its geometry and control
+parameters come from the pinned upstream model. The included head calibration
+provides the head camera's intrinsics and pose relative to the robot base.
+Select `calibrated_head` in the viewer to see its perspective. See [third-party notices](../THIRD_PARTY.md).
+
+For a task scene, pass `--scene /path/to/scene.xml`. To reuse the exact robot,
+copy the directory containing the packaged `base.xml` into your task workspace,
+then edit the copy of `base.xml` and keep the sibling robot XML and its mesh
+paths intact. Python callers can use
+`openarm_simulation.standalone.base_scene_path()` to locate the installed XML.
+Keep task objects, policies, datasets and project-specific camera calibrations
+in your application or experiment workspace.
+
+## Bundled camera parameters
+
+The installed package includes the original head and wrist JSON from
+`tacpilot/tacpilot@e6e979a1fa9bd3bc40cdeb78acb68f91d23d3759` under
+`assets/simulation/cameras/{head,wrist}/calibration.json`. The runtime reads the
+packaged copy directly.
+
+```sh
+openarm-runtime camera-parameters
+openarm-runtime camera-parameters --camera wrist
+openarm-runtime simulate --calibration /path/to/other-head.json --view
+```
+
+Python callers can use
+`openarm_runtime.camera_parameters.load_camera_parameters(camera="head", path=None)`.
+Pass a local JSON with the same schema to override the package default.
+A custom scene uses its own cameras by default. To apply an explicit head
+calibration with `--scene`, declare a fixed `arm_origin` site with the
+calibration's robot base frame and pass `--calibration`. The scene must leave
+the `calibrated_head` camera name free.
+
+The head parameters describe the measured OpenArm V2 Astra Pro installation
+at native 1280×720. The renderer uses the pinhole intrinsics, including
+unequal focal lengths and the off-centre principal point. To compare with a
+real frame, undistort it using the original OpenCV coefficients and intrinsics.
+The wrist file provides one set of intrinsics and positions for the two wrists,
+without complete rotational extrinsics. Physical use requires confirming the
+camera, lens, mounting and image geometry or supplying a new calibration.
+Reading these defaults does not open devices or register them on a workstation.
+
+## Passive platform backend
 
 The backend supplies physics feedback and rendered head/overview cameras. It has
 no automatic calibration, lift, mounting sequence or pose search. Physical leader
