@@ -1,82 +1,232 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PICO Classic right arm</title>
-<h1>PICO Classic right arm</h1>
-<label>Session token <input id="token" type="password" autocomplete="off"></label>
-<button id="start">Start</button>
-<button id="stop" disabled>Stop</button>
-<p id="status" role="status">Enter the session token to start.</p>
-<img id="camera" alt="Head camera" hidden>
+<title>PICO · OpenArm 双臂遥操</title>
+<style>
+  :root {
+    color-scheme: dark;
+    font: 17px/1.5 system-ui, "Noto Sans SC", sans-serif;
+    background: #10151a;
+    color: #f3f6f8;
+    --muted: #b6c3cd;
+    --line: #34414b;
+    --panel: #192127;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; }
+  main { max-width: 1040px; margin: 0 auto; padding: clamp(20px, 5vw, 56px); }
+  header { margin-bottom: 28px; }
+  header p { color: #8bdacf; font-weight: 700; margin: 0 0 8px; }
+  h1 { font-size: clamp(30px, 5vw, 48px); line-height: 1.15; margin: 0; }
+  .workspace { display: grid; grid-template-columns: 1fr .95fr; gap: 20px; }
+  section, figure { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; margin: 0; }
+  section { padding: 22px; }
+  .controls { display: grid; gap: 12px; }
+  button {
+    width: 100%; min-height: 74px; padding: 12px 18px; cursor: pointer;
+    border-radius: 12px; border: 1px solid transparent;
+    font: inherit; font-size: 23px; font-weight: 750;
+  }
+  button span { font-size: 15px; font-weight: 600; margin-left: 8px; }
+  #start { background: #8be2d2; color: #102b24; }
+  #home { background: #25343c; color: #e6f4f7; border-color: #536970; }
+  #stop { background: #412729; color: #ffcdca; border-color: #a15a59; }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, input:focus-visible { outline: 3px solid #f7ca78; outline-offset: 3px; }
+  #status {
+    margin: 18px 0 0; padding: 12px 14px; min-height: 52px;
+    background: #11191e; border-radius: 10px; color: #c8eee8; overflow-wrap: anywhere;
+  }
+  #status[data-tone="error"] { color: #ffd3aa; }
+  label { display: grid; gap: 6px; margin-bottom: 16px; color: var(--muted); }
+  input {
+    min-height: 52px; border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+    background: #11191e; color: #f3f6f8; font: inherit;
+  }
+  figure { display: flex; flex-direction: column; align-self: start; overflow: hidden; }
+  figcaption { padding: 14px 18px; font-weight: 650; }
+  .preview {
+    display: grid; place-items: center; aspect-ratio: 16 / 9;
+    position: relative; background: #101519; color: var(--muted);
+  }
+  .preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .preview span { padding: 12px; }
+  .camera-previews { display: grid; grid-template-columns: 1fr 1.5fr 1fr; gap: 8px; padding: 0 10px 12px; }
+  .camera-previews figure { background: #11191e; border-radius: 8px; }
+  .camera-previews figcaption { padding: 6px 4px; text-align: center; font-size: 13px; }
+  .camera-options { display: grid; gap: 8px; margin-top: 14px; padding: 0 12px 12px; }
+  .camera-options label { display: flex; justify-content: space-between; margin: 0; align-items: center; }
+  .camera-options input { min-height: 34px; padding: 0; }
+  body[data-passwordless] label:has(#token) { display: none; }
+  body[data-passwordless] .camera-options label { display: flex; }
+  .guidance { margin: 18px 0 0; color: var(--muted); font-size: 16px; }
+  @media (max-width: 670px) { .workspace { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p>OpenArm · PICO</p>
+    <h1>实机遥操</h1>
+  </header>
+  <div class="workspace">
+    <section aria-label="遥操控制">
+      <label>连接密码 <input id="token" type="password" autocomplete="off"></label>
+      <div class="controls">
+        <button id="start">开始遥操 <span lang="en">Start</span></button>
+        <button id="home" hidden>双臂回零</button>
+        <button id="stop" disabled>停止 <span lang="en">Stop</span></button>
+      </div>
+      <p id="status" role="status">松开两只手柄的侧握键，然后点开始遥操。</p>
+      <p class="guidance">开始时请平视正前方。双臂以进入时的朝向为准，转头不会改变控制方向。按住侧握键跟随，松开保持。回零前请确认双臂下垂路径畅通。</p>
+    </section>
+    <section aria-label="相机窗口">
+      <div class="camera-previews">
+        <figure><figcaption>左腕</figcaption><div class="preview"><img id="camera-left" alt="左腕相机" hidden></div></figure>
+        <figure><figcaption>头部</figcaption><div class="preview"><img id="camera-head" alt="头部相机" hidden></div></figure>
+        <figure><figcaption>右腕</figcaption><div class="preview"><img id="camera-right" alt="右腕相机" hidden></div></figure>
+      </div>
+      <div class="camera-options">
+        <label>进入时显示相机 <input id="show-cameras" type="checkbox" checked></label>
+        <label>窗口初始大小 <input id="camera-scale" type="range" min=".55" max="1.35" value="1" step=".05"></label>
+      </div>
+      <p class="guidance">右手 A 显示或隐藏窗口。按 B 进入布局，指向窗口后按住扳机拖动，推摇杆缩放，再按 B 返回遥操。</p>
+    </section>
+  </div>
+</main>
 <script type="module">
+import {createCameraWindows} from "/pico-windows.js";
+
 const start = document.querySelector("#start");
+const home = document.querySelector("#home");
 const stop = document.querySelector("#stop");
 const status = document.querySelector("#status");
-const camera = document.querySelector("#camera");
+const showCameras = document.querySelector("#show-cameras");
+const scale = document.querySelector("#camera-scale");
+const images = new Map(["left", "head", "right"].map(name => [name, document.querySelector("#camera-" + name)]));
+const passwordless = document.body.hasAttribute("data-passwordless");
 let active = null;
-const message = (text) => { status.textContent = text; };
 
-function cameraLayer(session) {
-  const gl = document.createElement("canvas").getContext("webgl", {xrCompatible: true, alpha: true});
-  const program = gl.createProgram();
-  for (const [type, source] of [
-    [gl.VERTEX_SHADER, "attribute vec2 p; varying vec2 uv; void main(){uv=p*.5+.5;gl_Position=vec4(p*vec2(.70,.42)+vec2(-.12,.08),0.,1.);}"],
-    [gl.FRAGMENT_SHADER, "precision mediump float; varying vec2 uv; uniform sampler2D image; void main(){gl_FragColor=texture2D(image,vec2(uv.x,1.-uv.y));}"],
-  ]) {
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error("Camera shader failed");
-    gl.attachShader(program, shader);
-  }
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error("Camera program failed");
-  gl.useProgram(program);
-  const buffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-  const attribute = gl.getAttribLocation(program, "p");
-  gl.enableVertexAttribArray(attribute);
-  gl.vertexAttribPointer(attribute, 2, gl.FLOAT, false, 0, 0);
-  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-  for (const name of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) gl.texParameteri(gl.TEXTURE_2D, name, gl.CLAMP_TO_EDGE);
-  for (const name of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, name, gl.LINEAR);
-  const layer = new XRWebGLLayer(session, gl);
-  session.updateRenderState({baseLayer: layer});
-  return (viewer) => {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    if (!viewer || !camera.naturalWidth) return;
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, camera);
-    for (const view of viewer.views) {
-      const vp = layer.getViewport(view);
-      gl.viewport(vp.x, vp.y, vp.width, vp.height);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
-  };
+function message(text, error = false) {
+  status.textContent = text;
+  status.dataset.tone = error ? "error" : "normal";
 }
 
-function finish(state, reason) {
+function updateCameras(cameras, visible) {
+  for (const [name, image] of images) {
+    const show = visible && cameras.includes(name);
+    if (show && !image.hasAttribute("src")) image.src = "/video/" + name;
+    if (!show) image.removeAttribute("src");
+    image.hidden = !show;
+  }
+}
+
+const closeMessages = {
+  "No right controller tracking": "未收到手柄定位。唤醒手柄后重新开始。",
+  "No controller tracking": "未收到手柄定位。唤醒手柄后重新开始。",
+  "Controller input timed out during arm startup": "机械臂启动时手柄输入中断。",
+  "Controller input timed out": "手柄输入中断，遥操已结束。",
+};
+
+function finish(state, reason, error = false) {
   if (active !== state) return;
   active = null;
   if (state.socket?.readyState === WebSocket.OPEN) state.socket.send("stop");
   state.socket?.close();
   state.session?.end().catch(() => {});
-  camera.removeAttribute("src");
-  camera.hidden = true;
+  updateCameras([], false);
   stop.disabled = true;
   start.disabled = false;
-  message(reason);
+  home.disabled = false;
+  message(reason, error);
 }
 
-stop.onclick = () => { if (active) finish(active, "Stopped. Press Start for a new session."); };
-start.onclick = async () => {
-  const state = {};
+function begin(state, text) {
   active = state;
   stop.disabled = false;
   start.disabled = true;
+  home.disabled = true;
+  message(text);
+}
+
+async function connect() {
+  const options = {method: "POST"};
+  if (!passwordless) {
+    options.headers = {"Content-Type": "application/json"};
+    options.body = JSON.stringify({token: document.querySelector("#token").value});
+  }
+  const access = await fetch("/access", options);
+  if (!access.ok) throw new Error("入口连接被拒绝");
+  return access.json();
+}
+
+function armStatus(arms) {
+  const descriptions = {waiting: "等待手柄", starting: "启动中", ready: "就绪", stopped: "已停止"};
+  return Object.entries(arms).map(([side, value]) =>
+    (side === "left" ? "左臂" : "右臂") + " " + (descriptions[value] ?? closeMessages[value] ?? "已停止")).join(" · ");
+}
+
+function inverseHeading(q) {
+  // Horizontal projection of the headset's forward vector (local -Z).
+  const x = 2 * (q.x * q.z + q.w * q.y);
+  const z = 1 - 2 * (q.x * q.x + q.y * q.y);
+  if (Math.hypot(x, z) < .15) return null;
+  const yaw = -Math.atan2(x, z);
+  return {cos: Math.cos(yaw), sin: Math.sin(yaw),
+    halfCos: Math.cos(yaw / 2), halfSin: Math.sin(yaw / 2)};
+}
+
+function controllerPose({position: p, orientation: q}, heading) {
+  const {cos, sin, halfCos: c, halfSin: s} = heading;
+  // Apply the same inverse yaw to position and orientation. The backend
+  // then computes the relative motion from the held grip's anchor.
+  return [cos * p.x + sin * p.z, p.y, cos * p.z - sin * p.x,
+    c * q.x + s * q.z, c * q.y + s * q.w, c * q.z - s * q.x, c * q.w - s * q.y];
+}
+
+stop.onclick = () => {
+  if (!active) return;
+  if (active.homing && active.socket?.readyState === WebSocket.OPEN) {
+    active.socket.send("stop");
+    stop.disabled = true;
+    message("正在停止回零…");
+    return;
+  }
+  finish(active, "已请求停止。再次点开始可建立新会话。");
+};
+home.onclick = async () => {
+  if (active) return;
+  const state = {homing: true};
+  begin(state, "正在连接双臂…");
+  try {
+    await connect();
+    if (active !== state) return;
+    const socket = new WebSocket("wss://" + location.host + "/input");
+    state.socket = socket;
+    socket.onopen = () => socket.send("home");
+    socket.onmessage = ({data}) => {
+      const reply = JSON.parse(data);
+      if (reply.home === "running" && !stop.disabled) message("双臂正在回零…");
+      if (reply.home === "complete") finish(state, "双臂已回到标定零位。");
+      if (reply.home === "stopped") finish(state, "回零已停止。");
+      if (reply.error) finish(state, "回零结束 · " + reply.error, true);
+    };
+    socket.onclose = () => finish(state, "回零连接已断开。请检查机器状态。", true);
+  } catch (error) {
+    finish(state, error.message, true);
+  }
+};
+start.onclick = async () => {
+  if (active) return;
+  if (!navigator.xr) {
+    message("WebXR 不可用。请用 Pico 浏览器打开并确认证书受信任。", true);
+    return;
+  }
+  const state = {};
+  begin(state, "正在进入 WebXR…");
   try {
     const session = await navigator.xr.requestSession("immersive-ar", {optionalFeatures: ["local-floor"]});
     if (active !== state) {
@@ -84,52 +234,97 @@ start.onclick = async () => {
       return;
     }
     state.session = session;
-    session.addEventListener("end", () => finish(state, "Session ended. Press Start to follow again."));
-    const access = await fetch("/access", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({token: document.querySelector("#token").value})});
-    if (!access.ok) throw new Error("Session token rejected");
-    if ((await access.json()).camera && active === state) {
-      camera.src = "/video";
-      camera.hidden = false;
-    }
+    session.addEventListener("end", () => finish(state, "已退出 WebXR。"));
+    const info = await connect();
+    const sides = info.sides ?? ["right"];
+    const cameras = info.cameras ?? (info.camera ? ["head"] : []);
     const space = await session.requestReferenceSpace("local-floor").catch(() => session.requestReferenceSpace("local"));
     if (active !== state) return;
-    const render = cameraLayer(session);
+    let cameraVisible = showCameras.checked;
+    let received = false;
+    const windows = createCameraWindows(session,
+      new Map(cameras.map(name => [name, images.get(name)])), Number(scale.value), cameraVisible,
+      visible => {
+        cameraVisible = visible;
+        if (received) updateCameras(cameras, visible);
+      });
+    const releaseBeforeGrip = new Set(sides);
+    let heading = null;
+    space.addEventListener("reset", () => {
+      windows.reset();
+      heading = null;
+      for (const side of sides) releaseBeforeGrip.add(side);
+    });
+
     const socket = new WebSocket("wss://" + location.host + "/input");
     state.socket = socket;
     let waiting = false;
-    let last = 0;
-    socket.onopen = () => socket.send("start");
-    socket.onmessage = (event) => {
-      if (event.data === "ok") {
-        waiting = false;
-        message("Input connected. Hold the right grip to follow.");
-      } else finish(state, JSON.parse(event.data).error || "Session stopped");
+    let last = -Infinity;
+    let shownStatus;
+    socket.onopen = () => {
+      socket.send("start/2");
+      message("请平视正前方，等待手柄定位…");
     };
-    socket.onclose = () => finish(state, "Input disconnected. Press Start for a new session.");
+    socket.onmessage = (event) => {
+      const reply = JSON.parse(event.data);
+      if (!reply.arms) {
+        finish(state, reply.error || "控制服务已结束。", true);
+        return;
+      }
+      waiting = false;
+      if (!received) {
+        received = true;
+        updateCameras(cameras, cameraVisible);
+      }
+      const text = armStatus(reply.arms);
+      if (text !== shownStatus) {
+        shownStatus = text;
+        message(text);
+      }
+    };
+    socket.onclose = event => finish(state,
+      closeMessages[event.reason] ?? (event.reason || "连接已关闭。请重新开始。"), true);
+
     function frame(now, xrFrame) {
       if (active !== state) return;
       try {
-        render(xrFrame.getViewerPose(space));
-        const right = [...session.inputSources].find((source) => source.handedness === "right");
-        const hand = right?.gripSpace ? xrFrame.getPose(right.gripSpace, space) : null;
-        if (hand && right.gamepad && socket.readyState === WebSocket.OPEN && !waiting && now - last >= 30) {
-          const {position: p, orientation: q} = hand.transform;
-          socket.send(JSON.stringify({pose: [p.x,p.y,p.z,q.x,q.y,q.z,q.w],
-            grip: Boolean(right.gamepad.buttons[1]?.pressed),
-            trigger: Boolean(right.gamepad.buttons[0]?.pressed), joystick_y: right.gamepad.axes[3] || 0}));
+        const viewer = session.visibilityState === "visible" ? xrFrame.getViewerPose(space) : null;
+        if (!heading && viewer) heading = inverseHeading(viewer.transform.orientation);
+        const controllers = new Map([...session.inputSources].filter(source => source.gripSpace && source.gamepad)
+          .map(source => [source.handedness, source]));
+        const editing = windows.update(viewer, xrFrame, space, controllers.get("right"), now);
+        if (socket.readyState === WebSocket.OPEN && !waiting && now - last >= 30) {
+          const samples = Object.fromEntries(sides.map(side => {
+            const controller = controllers.get(side);
+            const pose = viewer && heading && controller ? xrFrame.getPose(controller.gripSpace, space) : null;
+            if (!pose || pose.emulatedPosition) return [side, null];
+            const gamepad = controller.gamepad;
+            const grip = Boolean(gamepad.buttons[1]?.pressed);
+            if (editing) releaseBeforeGrip.add(side);
+            else if (!grip) releaseBeforeGrip.delete(side);
+            return [side, {
+              pose: controllerPose(pose.transform, heading),
+              grip: grip && !editing && !releaseBeforeGrip.has(side),
+              trigger: !editing && Boolean(gamepad.buttons[0]?.pressed),
+              joystick_y: editing ? 0 : gamepad.axes[3] || 0,
+            }];
+          }));
+          socket.send(JSON.stringify(samples));
           waiting = true;
           last = now;
         }
+        windows.render(viewer, now);
         session.requestAnimationFrame(frame);
       } catch (error) {
-        finish(state, error.message);
+        finish(state, error.message, true);
       }
     }
     session.requestAnimationFrame(frame);
   } catch (error) {
-    finish(state, error.message);
+    finish(state, error.message, true);
   }
 };
-addEventListener("pagehide", () => { if (active) finish(active, "Page closed."); });
+addEventListener("pagehide", () => { if (active) finish(active, "页面已关闭。"); });
 </script>
+</body>
+</html>

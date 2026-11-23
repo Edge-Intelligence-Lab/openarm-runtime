@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.10.0 — 2026-11-23
+
+- Ship installable PICO WebXR teleoperation for Classic CAN arms using Runtime
+  IK, active gravity compensation and bounded joint commands. Configure one
+  arm or both arms with an external hardware and IK profile.
+- Give the head and wrist camera feeds independently movable and resizable
+  WebXR windows. Add operator-started dual-arm return to calibrated motor zero.
+- Calibrate the control heading on WebXR entry and require a current control
+  page before enabling. Prefer a bent elbow and centered wrist when the
+  redundant joint direction preserves the commanded TCP motion.
+- Add PICO simulation practice scenes and bundle the generic OpenArm v2
+  simulation assets and camera baseline for offline use.
+- Record native-rate tactile policy sidecars and persist pad mapping. Bind
+  policy state adapters and protect against blocked gripper closure.
+
 - Double the independent dual-arm down button's peak speed to 10 degrees/s at
   operator request; retain the 5 degrees/s teleoperation default and unchanged
   arrival, tracking, feedback and stop protections.

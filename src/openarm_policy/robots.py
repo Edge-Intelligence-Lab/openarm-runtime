@@ -67,12 +67,15 @@ class ClassicRobot:
     any enable. A shared target deadline stops both workers independently of the
     policy/session thread. close() waits for verified disable via ArmHold.
     """
-    def __init__(self, profile, sides=("left", "right"), watchdog_s=0.5, record=None, integral=None):
+    def __init__(self, profile, sides=("left", "right"), watchdog_s=0.5, record=None, integral=None,
+                 *, allow_unreadable_mode=True, cancelled=None):
         if not profile.mapping_verified or not finite(watchdog_s) or not 0 < watchdog_s <= 2:
             raise ValueError("Verified profile and watchdog in (0, 2] seconds required")
         self.profile, self.sides = profile, tuple(sides)
         self.spec, self.streams = joint_spec(sides), state_specs(sides)
         self.watchdog_s = watchdog_s
+        self.allow_unreadable_mode = allow_unreadable_mode
+        self.cancelled = cancelled or (lambda: False)
         if integral is not None:
             from openarm_runtime.integral import TrackingIntegral
             TrackingIntegral(**integral)  # Validate before opening devices.
@@ -115,8 +118,11 @@ class ClassicRobot:
                     min(s.received_at for s in states.values()),
                     tuple((states[i].position, states[i].velocity, states[i].torque) for i in range(1, 9)))
 
+        def stopping():
+            return self.stop.is_set() or self.cancelled()
+
         def cancelled():
-            if self.stop.is_set():
+            if stopping():
                 return True
             with self.lock:
                 expired = self.deadline is not None and time.monotonic() >= self.deadline
@@ -133,7 +139,7 @@ class ClassicRobot:
                 preflight = bus.preflight()
                 self._record(side, {"event": "preflight", "motors": preflight})
                 gravity = prepare_gravity(self.profile, side, bus, preflight)
-                check_modes(bus, True, self.stop.is_set)
+                check_modes(bus, self.allow_unreadable_mode, stopping)
                 self.prepared.wait()
                 with ArmHold(bus, cancelled, lambda e: self._record(side, e), publish,
                              tracking=True, gravity=gravity, integral=self.integral) as control:
@@ -146,7 +152,7 @@ class ClassicRobot:
                                 self.ready.set()
                         period = 1 / self.profile.rate_hz
                         previous = time.monotonic()
-                        while not self.stop.is_set():
+                        while not stopping():
                             tick = time.monotonic()
                             if tick - previous > max(0.25, 3 * period):
                                 raise TimeoutError("CAN control deadline missed")
@@ -179,6 +185,8 @@ class ClassicRobot:
                 worker.start()
             if not self.ready.wait(15):
                 raise TimeoutError("Robot startup timed out")
+            if self.cancelled() and not self.errors:
+                raise InterruptedError("User stop")
             self.snapshot()
         except BaseException:
             self.close()

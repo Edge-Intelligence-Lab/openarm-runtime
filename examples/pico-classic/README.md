@@ -1,10 +1,8 @@
-# PICO to Classic right arm
+# PICO to Classic arms
 
-This optional Runtime command serves one HTTPS WebXR page for the Classic
-right arm. It uses the same Runtime CAN, joint limits and gravity code as
-the other hardware entry points. The lab's earlier dora trial used Enactic
-mink IK, while the command in this repository uses Runtime's
-`DifferentialIK`. The existing simulation workspace is independent.
+This optional Runtime command serves one HTTPS WebXR page for Classic
+arm teleoperation. It uses Runtime's CAN transport, joint limits,
+gravity compensation and `DifferentialIK`.
 
 ## Install and configure
 
@@ -30,8 +28,14 @@ Copy the two JSON examples to a machine directory outside the checkout:
   nominal stock closed-fingertip position. Configure actual payload and
   mounting gravity with the existing gravity profile.
 
-Create a private token file and use a TLS certificate trusted by the
-PICO browser, with a SAN matching the address you will open.
+For dual-arm control, pass a JSON object keyed by `"left"` and `"right"`, with
+each entry containing that arm's verified IK settings. Each arm may set
+`velocity_rad_s` (default 0.25, maximum 0.5). Enable active gravity for both
+arms in the Classic profile and use a control rate of at least 20 Hz.
+
+Use a TLS certificate trusted by the PICO browser, with a SAN matching the
+workstation address. Choose a token file for password entry or
+`--passwordless` on a private lab network.
 
 ```sh
 umask 077
@@ -44,26 +48,54 @@ uv run openarm-runtime --config /path/to/classic.json pico-classic \
   --camera /dev/v4l/by-path/HEAD_RGB_DEVICE
 ```
 
-The head camera is optional. The lab rig previously needed an explicit
-MIT trial for motors with unreadable RID10. Use `--allow-unreadable-mode`
-only for that verified setup. A readable non-MIT mode always fails preflight. Open the HTTPS address in PICO Browser,
-enter the token, release the right grip and press **Start**. Hold the
-right grip for Cartesian following. Release it to hold position. While holding the grip, use the right stick Y to adjust the aperture or
-hold the trigger to close. Exit WebXR to end the
-session and disable. To follow again, enter a new session with **Start**.
+The cameras are optional. Use `--left-wrist-camera` and `--right-wrist-camera`
+with the corresponding stable V4L2 device paths to place wrist windows beside
+the head view. Press right **A** to show or hide the windows. Press right **B**
+to enter layout mode, point at a window and hold the trigger to drag it,
+or move the thumbstick vertically to resize it. Press **B** again to leave
+layout mode and release the grips before following again.
+
+Use `--allow-unreadable-mode` for an installation verified to use MIT mode
+when RID10 readback times out. A readable non-MIT mode fails preflight.
+Open the HTTPS address in PICO Browser, enter the token if configured, look
+straight ahead and press **Start** with both grips released. Hold either
+controller's grip to follow on that arm and release it to hold position.
+While gripping, use the stick Y axis to adjust the aperture or the trigger to
+close. Exit WebXR to disable the arms. After a server update, reload the page
+before starting another session.
+
+On a dual-arm page, exit WebXR and select **双臂回零** to return both arms
+to their calibrated motor zeros. This uses the
+[existing coordinated return](../../docs/natural-hanging-return.md), preserving
+each gripper's entry position during motion and disabling both arms afterward.
+Use **停止** to cancel. Confirm the return path is clear before starting.
 
 ## Data path
 
-The browser sends tracked six-DoF right-hand poses. The server opens
+The browser sends tracked six-DoF hand poses. The server opens
 only one authorized session and waits for valid input before entering
 the Classic session. A grip press anchors the current measured TCP.
-Controller translation and rotation become a TCP target via Runtime's
-PICO mapping and `cartesian_start`. That helper uses the configured
-`KinematicChain`, model/physical joint bounds and `DifferentialIK`.
-The bridge bounds command lead against current motor feedback.
+Controller translation and rotation use the same XR-to-robot basis as
+simulation: forward, right and up map to robot +X, −Y and +Z. The page fixes
+the control heading from the first valid horizontal headset direction when
+entering WebXR, or after a reference space reset. Look ahead when starting.
+Turning your head during control leaves the heading and camera behavior independent.
+TCP targets use the configured `KinematicChain`, model/physical joint bounds and
+`DifferentialIK`. Each arm limits joint speed and the command lead over measured
+feedback. When a hand moves quickly, the arm follows the newest target as
+feedback catches up. Loss of one controller stops its arm independently.
+
+The solver first computes the hand-driven TCP step. When joint room remains,
+it uses the redundant joint direction to prefer a moderately bent elbow and
+centered wrist across clutches. A forward-kinematics check rejects corrections
+that reverse the requested motion or move the TCP more than 0.1 mm or 0.046°
+from the primary step. The correction shares the same step and tracking
+limits as the primary command and fades in as the hand moves away from the
+clutch anchor. At a joint or reach boundary, the primary step may be all
+that is feasible.
 
 The Classic session opens the existing exclusive bus lease, checks
-the arm and reads `Profile.gravity["right"]` through
+the arm and reads its configured `Profile.gravity` entry through
 Runtime’s `prepare_arm` and `prepare_gravity`. The launcher and session
 both require active gravity. `ArmHold` adds the ramped gravity
 torque to each MIT tracking exchange. Returning from the session invokes
@@ -79,14 +111,3 @@ uv sync --extra pico-classic
 uv run --extra pico-classic openarm-runtime pico-classic --smoke
 uv run --extra pico-classic python -m unittest discover -s tests -p test_pico_classic.py -v
 ```
-
-**Operator trial on the lab's preceding dora deployment.** The operator
-verified right-arm following during PICO use and reported normal
-shoulder response after enabling full Runtime gravity feedforward.
-A separate recorded run confirmed verified right-arm disable after a UI
-stop, and watchdog disable when IK targets stopped arriving. The later
-single-entry dora flow was deployed with both arms disabled before Start.
-These observations cover that deployment. The new Runtime launcher,
-WebXR camera rendering and disable on immersive exit still need an
-operator-run hardware repeat. Record J1/J2 target and feedback, the
-`gravity_config` event, and the verified "arm_disable" event when running it.

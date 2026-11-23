@@ -51,6 +51,32 @@ class CartesianTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'J6'):
             step(reported, (0., 0., 0.), (0., 0., 0.), .035)
 
+    def test_pico_refines_posture_within_tcp_and_joint_step_bounds(self):
+        from scipy.spatial.transform import Rotation
+        from openarm_runtime.pico_classic import refine_posture
+
+        np = self.np
+        primary = np.full(7, .3)
+        target = self.chain.forward(primary)
+        posture = primary + np.array([.4, -.1, .2, -.3, .4, .2, -.3])
+        refined = refine_posture(self.chain, primary, primary, target, posture,
+                                 primary - .005, primary + .005, .05, 1.)
+        self.assertLess(np.linalg.norm(refined - posture), np.linalg.norm(primary - posture))
+        self.assertLessEqual(np.abs(refined - primary).max(), .00500001)
+        pose = self.chain.forward(refined)
+        self.assertLessEqual(np.linalg.norm(pose[:3, 3] - target[:3, 3]), .0001)
+        self.assertLessEqual(Rotation.from_matrix(pose[:3, :3] @ target[:3, :3].T).magnitude(), .0008)
+
+    def test_pico_rejects_posture_step_in_opposite_direction_when_primary_stalls(self):
+        from openarm_runtime.pico_classic import preserves_motion
+
+        np = self.np
+        stalled = np.zeros(3)
+        tiny_rise = np.array([0., 0., .00005])
+        down = np.array([0., 0., -.02])
+        self.assertFalse(preserves_motion(stalled, tiny_rise, down, .0001))
+        self.assertTrue(preserves_motion(stalled, -tiny_rise, down, .0001))
+
     def test_no_jump_takeover_and_reclutch(self):
         from openarm_runtime.cartesian import RelativePose
         leader = self.chain.forward([.3]*7)

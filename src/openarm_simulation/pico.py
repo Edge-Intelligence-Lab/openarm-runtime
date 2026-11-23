@@ -15,6 +15,12 @@ START_SESSION = object()
 RESET_SCENE = object()
 
 
+def xr_to_robot(vector, axes=BASE_AXES):
+    """Express an XR vector in robot coordinates using one basis vector per XR axis."""
+    return tuple(sum(component * axis for component, axis in zip(vector, row, strict=True))
+                 for row in zip(*axes, strict=True))
+
+
 def overview_axes(position, target):
     """Map WebXR right/up/back to the overview camera's horizontal frame."""
     dx, dy = (target[i] - position[i] for i in range(2))
@@ -133,8 +139,7 @@ class PicoTeleop:
         self.release()
 
     def to_robot_frame(self, vector):
-        return tuple(sum(component * axis for component, axis in zip(vector, row, strict=True))
-                     for row in zip(*self.axes, strict=True))
+        return xr_to_robot(vector, self.axes)
 
     def reanchor(self, pose):
         if self.origin is not None and pose is not None:
