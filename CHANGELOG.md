@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.10.1 — 2026-11-23
+
+- Keep one Pico control URL and reload outdated pages in the same tab before
+  starting or reconnecting control.
+- Keep WebXR open across temporary control interruptions. Restore each arm
+  from fresh tracking and a released controller, after the previous arm
+  session finishes cleanup.
+- Wait for arm readiness before opening camera streams one at a time.
+  Send controller updates independently of status replies.
+- Follow the controller continuously across the reachable workspace during
+  a grip, with bounded target lead and prompt response to reversals.
+- Keep the operator's initial heading across clutching and reconnection.
+  Preserve that heading when the headset reports a reference-space reset.
+
 ## 0.10.0 — 2026-11-23
 
 - Ship installable PICO WebXR teleoperation for Classic CAN arms using Runtime

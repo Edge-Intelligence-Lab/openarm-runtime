@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openarm-runtime"
-version = "0.10.0"
+version = "0.10.1"
 description = "Reusable OpenArm Classic CAN control, Feetech leader readout, tactile/video capture and optional Viser tools"
 readme = "README.md"
 license = "MIT"

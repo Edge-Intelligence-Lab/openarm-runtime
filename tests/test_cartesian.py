@@ -77,6 +77,37 @@ class CartesianTests(unittest.TestCase):
         self.assertFalse(preserves_motion(stalled, tiny_rise, down, .0001))
         self.assertTrue(preserves_motion(stalled, -tiny_rise, down, .0001))
 
+    def test_pico_tcp_motion_can_continue_past_one_grips_old_travel_limit(self):
+        from scipy.spatial.transform import Rotation
+        from openarm_runtime.pico_classic import advance_tcp_target
+
+        np = self.np
+        target = np.eye(4)
+        for _ in range(25):
+            advance_tcp_target(target, target.copy(), np.array([.01, 0., 0.]),
+                               np.array([0., 0., .05]))
+        self.assertAlmostEqual(target[0, 3], .25)
+        self.assertAlmostEqual(Rotation.from_matrix(target[:3, :3]).magnitude(), 1.25)
+
+    def test_pico_tcp_target_bounds_backlog_and_reverses_without_regripping(self):
+        from scipy.spatial.transform import Rotation
+        from openarm_runtime.pico_classic import (
+            TCP_POSITION_LEAD_M, TCP_ROTATION_LEAD_RAD, advance_tcp_target,
+        )
+
+        np = self.np
+        reference = target = np.eye(4)
+        target = target.copy()
+        for _ in range(20):
+            advance_tcp_target(target, reference, np.array([.02, 0., 0.]),
+                               np.array([0., 0., .1]))
+        self.assertAlmostEqual(target[0, 3], TCP_POSITION_LEAD_M)
+        self.assertAlmostEqual(Rotation.from_matrix(target[:3, :3]).magnitude(), TCP_ROTATION_LEAD_RAD)
+        advance_tcp_target(target, reference, np.array([-.01, 0., 0.]),
+                           np.array([0., 0., -.05]))
+        self.assertAlmostEqual(target[0, 3], -.01)
+        self.assertAlmostEqual(Rotation.from_matrix(target[:3, :3]).as_rotvec()[2], -.05)
+
     def test_no_jump_takeover_and_reclutch(self):
         from openarm_runtime.cartesian import RelativePose
         leader = self.chain.forward([.3]*7)

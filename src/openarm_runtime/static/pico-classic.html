@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="pico-revision" content="__PICO_REVISION__">
 <title>PICO · OpenArm 双臂遥操</title>
 <style>
   :root {
@@ -108,6 +109,7 @@ const showCameras = document.querySelector("#show-cameras");
 const scale = document.querySelector("#camera-scale");
 const images = new Map(["left", "head", "right"].map(name => [name, document.querySelector("#camera-" + name)]));
 const passwordless = document.body.hasAttribute("data-passwordless");
+const revision = document.querySelector('meta[name="pico-revision"]').content;
 let active = null;
 
 function message(text, error = false) {
@@ -125,11 +127,12 @@ function updateCameras(cameras, visible) {
 }
 
 const closeMessages = {
-  "No right controller tracking": "未收到手柄定位。唤醒手柄后重新开始。",
-  "No controller tracking": "未收到手柄定位。唤醒手柄后重新开始。",
+  "No right controller tracking": "等待手柄定位恢复",
+  "No controller tracking": "等待手柄定位恢复",
   "Controller input timed out during arm startup": "机械臂启动时手柄输入中断。",
-  "Controller input timed out": "手柄输入中断，遥操已结束。",
+  "Controller input timed out": "手柄信号中断，等待恢复",
 };
+const recoverableCloses = new Set([1001, 1006, 4001]);
 
 function finish(state, reason, error = false) {
   if (active !== state) return;
@@ -152,15 +155,25 @@ function begin(state, text) {
   message(text);
 }
 
-async function connect() {
-  const options = {method: "POST"};
+async function connect(state) {
+  const options = {method: "POST", cache: "no-store", signal: AbortSignal.timeout(5000)};
   if (!passwordless) {
     options.headers = {"Content-Type": "application/json"};
     options.body = JSON.stringify({token: document.querySelector("#token").value});
   }
   const access = await fetch("/access", options);
-  if (!access.ok) throw new Error("入口连接被拒绝");
-  return access.json();
+  if (!access.ok) {
+    if (access.status >= 500) throw new TypeError("控制服务暂不可用");
+    throw new Error("入口连接被拒绝");
+  }
+  const info = await access.json();
+  if (active !== state) return null;
+  if (info.revision !== revision) {
+    finish(state, "页面已更新，正在刷新…");
+    location.replace("/");
+    return null;
+  }
+  return info;
 }
 
 function armStatus(arms) {
@@ -175,16 +188,30 @@ function inverseHeading(q) {
   const z = 1 - 2 * (q.x * q.x + q.y * q.y);
   if (Math.hypot(x, z) < .15) return null;
   const yaw = -Math.atan2(x, z);
-  return {cos: Math.cos(yaw), sin: Math.sin(yaw),
-    halfCos: Math.cos(yaw / 2), halfSin: Math.sin(yaw / 2)};
+  return {x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2)};
+}
+
+function composeRotation(a, b) {
+  return {
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+  };
 }
 
 function controllerPose({position: p, orientation: q}, heading) {
-  const {cos, sin, halfCos: c, halfSin: s} = heading;
-  // Apply the same inverse yaw to position and orientation. The backend
-  // then computes the relative motion from the held grip's anchor.
-  return [cos * p.x + sin * p.z, p.y, cos * p.z - sin * p.x,
-    c * q.x + s * q.z, c * q.y + s * q.w, c * q.z - s * q.x, c * q.w - s * q.y];
+  const {x, y, z, w} = heading;
+  const tx = 2 * (y * p.z - z * p.y);
+  const ty = 2 * (z * p.x - x * p.z);
+  const tz = 2 * (x * p.y - y * p.x);
+  const hand = composeRotation(heading, q);
+  // Translation of the reference origin cancels when the next grip
+  // anchors the hand's relative motion.
+  return [p.x + w * tx + y * tz - z * ty,
+    p.y + w * ty + z * tx - x * tz,
+    p.z + w * tz + x * ty - y * tx,
+    hand.x, hand.y, hand.z, hand.w];
 }
 
 stop.onclick = () => {
@@ -202,8 +229,7 @@ home.onclick = async () => {
   const state = {homing: true};
   begin(state, "正在连接双臂…");
   try {
-    await connect();
-    if (active !== state) return;
+    if (!await connect(state)) return;
     const socket = new WebSocket("wss://" + location.host + "/input");
     state.socket = socket;
     socket.onopen = () => socket.send("home");
@@ -235,55 +261,114 @@ start.onclick = async () => {
     }
     state.session = session;
     session.addEventListener("end", () => finish(state, "已退出 WebXR。"));
-    const info = await connect();
+    const info = await connect(state);
+    if (!info) return;
     const sides = info.sides ?? ["right"];
     const cameras = info.cameras ?? (info.camera ? ["head"] : []);
     const space = await session.requestReferenceSpace("local-floor").catch(() => session.requestReferenceSpace("local"));
     if (active !== state) return;
     let cameraVisible = showCameras.checked;
-    let received = false;
+    const cameraOrder = ["head", "left", "right"].filter(name => cameras.includes(name));
+    let cameraCount = 0;
+    let nextCameraAt = Infinity;
+    let armsReady = false;
     const windows = createCameraWindows(session,
       new Map(cameras.map(name => [name, images.get(name)])), Number(scale.value), cameraVisible,
       visible => {
         cameraVisible = visible;
-        if (received) updateCameras(cameras, visible);
+        if (!visible) {
+          cameraCount = 0;
+          updateCameras([], false);
+        }
+        nextCameraAt = visible && armsReady ? performance.now() + 500 : Infinity;
       });
     const releaseBeforeGrip = new Set(sides);
+    const waitForNeutral = new Set(sides);
     let heading = null;
-    space.addEventListener("reset", () => {
+    space.addEventListener("reset", event => {
       windows.reset();
-      heading = null;
-      for (const side of sides) releaseBeforeGrip.add(side);
-    });
-
-    const socket = new WebSocket("wss://" + location.host + "/input");
-    state.socket = socket;
-    let waiting = false;
-    let last = -Infinity;
-    let shownStatus;
-    socket.onopen = () => {
-      socket.send("start/2");
-      message("请平视正前方，等待手柄定位…");
-    };
-    socket.onmessage = (event) => {
-      const reply = JSON.parse(event.data);
-      if (!reply.arms) {
-        finish(state, reply.error || "控制服务已结束。", true);
+      if (!heading) return;
+      if (!event.transform) {
+        finish(state, "头显重置了坐标，请重新开始以确定前方。", true);
         return;
       }
-      waiting = false;
-      if (!received) {
-        received = true;
-        updateCameras(cameras, cameraVisible);
+      // The reset gives the new axes expressed in the old frame. Compose
+      // them with the original heading instead of sampling the user's gaze.
+      heading = composeRotation(heading, event.transform.orientation);
+      retryControl();
+    });
+
+    let last = -Infinity;
+    let shownStatus;
+    let retryAt = Infinity;
+    let retryDelay = 250;
+    let socketDeadline = Infinity;
+
+    function retryControl() {
+      const socket = state.socket;
+      state.socket = null;
+      socket?.close();
+      for (const side of sides) waitForNeutral.add(side);
+      armsReady = false;
+      cameraCount = 0;
+      nextCameraAt = Infinity;
+      updateCameras([], false);
+      shownStatus = undefined;
+      retryAt = performance.now() + retryDelay;
+      retryDelay = Math.min(4000, retryDelay * 2);
+      message("遥操连接中断，正在自动重连…");
+    }
+
+    async function openControl(reconnecting = false) {
+      retryAt = Infinity;
+      try {
+        if (reconnecting && !await connect(state)) return;
+        if (active !== state) return;
+        const socket = new WebSocket("wss://" + location.host + "/input");
+        state.socket = socket;
+        socketDeadline = performance.now() + 5000;
+        socket.onopen = () => {
+          if (state.socket !== socket || active !== state) return;
+          last = -Infinity;
+          socketDeadline = performance.now() + 1500;
+          socket.send("start/4");
+          message(reconnecting ? "已重连，等待手柄和机械臂就绪…" : "请平视正前方，等待手柄定位…");
+        };
+        socket.onmessage = (event) => {
+          if (state.socket !== socket || active !== state) return;
+          socketDeadline = performance.now() + 1500;
+          const reply = JSON.parse(event.data);
+          if (!reply.arms) {
+            finish(state, reply.error || "控制服务已结束。", true);
+            return;
+          }
+          for (const [side, value] of Object.entries(reply.arms)) {
+            if (value in closeMessages) waitForNeutral.add(side);
+          }
+          const values = Object.values(reply.arms);
+          if (!armsReady && values.includes("ready") && !values.includes("starting")) {
+            armsReady = true;
+            retryDelay = 250;
+            if (cameraVisible) nextCameraAt = performance.now() + 500;
+          }
+          const text = armStatus(reply.arms);
+          if (text !== shownStatus) {
+            shownStatus = text;
+            message(text);
+          }
+        };
+        socket.onclose = event => {
+          if (state.socket !== socket || active !== state) return;
+          if (recoverableCloses.has(event.code)) retryControl();
+          else finish(state, closeMessages[event.reason] ?? (event.reason || "连接已关闭。请重新开始。"), true);
+        };
+      } catch (error) {
+        if (active !== state) return;
+        if (reconnecting && (error instanceof TypeError || error.name === "TimeoutError")) retryControl();
+        else finish(state, error.message, true);
       }
-      const text = armStatus(reply.arms);
-      if (text !== shownStatus) {
-        shownStatus = text;
-        message(text);
-      }
-    };
-    socket.onclose = event => finish(state,
-      closeMessages[event.reason] ?? (event.reason || "连接已关闭。请重新开始。"), true);
+    }
+    void openControl();
 
     function frame(now, xrFrame) {
       if (active !== state) return;
@@ -293,25 +378,39 @@ start.onclick = async () => {
         const controllers = new Map([...session.inputSources].filter(source => source.gripSpace && source.gamepad)
           .map(source => [source.handedness, source]));
         const editing = windows.update(viewer, xrFrame, space, controllers.get("right"), now);
-        if (socket.readyState === WebSocket.OPEN && !waiting && now - last >= 30) {
+        if (viewer && now >= retryAt) void openControl(true);
+        if (state.socket && now >= socketDeadline) retryControl();
+        const socket = state.socket;
+        if (socket?.readyState === WebSocket.OPEN && socket.bufferedAmount === 0 && now - last >= 30) {
           const samples = Object.fromEntries(sides.map(side => {
             const controller = controllers.get(side);
             const pose = viewer && heading && controller ? xrFrame.getPose(controller.gripSpace, space) : null;
             if (!pose || pose.emulatedPosition) return [side, null];
             const gamepad = controller.gamepad;
             const grip = Boolean(gamepad.buttons[1]?.pressed);
+            const trigger = Boolean(gamepad.buttons[0]?.pressed);
+            if (waitForNeutral.has(side)) {
+              if (grip || trigger || editing) return [side, null];
+              waitForNeutral.delete(side);
+            }
             if (editing) releaseBeforeGrip.add(side);
             else if (!grip) releaseBeforeGrip.delete(side);
             return [side, {
               pose: controllerPose(pose.transform, heading),
               grip: grip && !editing && !releaseBeforeGrip.has(side),
-              trigger: !editing && Boolean(gamepad.buttons[0]?.pressed),
+              trigger: !editing && trigger,
               joystick_y: editing ? 0 : gamepad.axes[3] || 0,
             }];
           }));
           socket.send(JSON.stringify(samples));
-          waiting = true;
           last = now;
+        }
+        // Camera opens and initial JPEG decoding can delay XR frames. Start
+        // them after arm startup and stagger the streams to reduce that spike.
+        if (cameraVisible && cameraCount < cameraOrder.length && now >= nextCameraAt) {
+          cameraCount++;
+          updateCameras(cameraOrder.slice(0, cameraCount), true);
+          nextCameraAt = now + 500;
         }
         windows.render(viewer, now);
         session.requestAnimationFrame(frame);

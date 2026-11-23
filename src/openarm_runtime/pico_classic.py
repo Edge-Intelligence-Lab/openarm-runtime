@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import contextmanager, suppress
 from functools import partial
+from hashlib import sha256
 from hmac import compare_digest
 from importlib.resources import files
 import json
@@ -23,7 +24,14 @@ FIRST_INPUT_TIMEOUT = 2.0
 CAMERA_PERIOD = 1 / 12
 SIDES = ("left", "right")
 TRACKING_LEAD = 0.15
-CONTROL_START = "start/2"
+TCP_POSITION_LEAD_M = .08
+TCP_ROTATION_LEAD_RAD = math.radians(30)
+CONTROL_START = "start/4"
+RECONNECT_CODE = 4001
+INPUT_LOSS_REASONS = {
+    "No right controller tracking", "No controller tracking",
+    "Controller input timed out during arm startup", "Controller input timed out",
+}
 PREFERRED_POSTURE_DEG = {
     "left": (0, -12, 0, 40, 0, 0, 0),
     "right": (0, 12, 0, 40, 0, 0, 0),
@@ -176,6 +184,33 @@ def tracking_target(previous, goal, measured, bounds, step):
     return min(hi, max(lo, previous + min(step, max(-step, bounded - previous))))
 
 
+def clear_reversed_lead(lead, movement, threshold):
+    """Drop the opposing backlog when the operator intentionally reverses."""
+    distance = math.hypot(*movement)
+    if distance > threshold:
+        direction = movement / distance
+        projection = lead @ direction
+        if projection < -.5 * math.hypot(*lead):
+            return lead - direction * projection
+    return lead
+
+
+def advance_tcp_target(target, reference, translation, rotation):
+    """Integrate hand motion while keeping only a bounded lead over the arm reference."""
+    from scipy.spatial.transform import Rotation
+
+    offset = clear_reversed_lead(target[:3, 3] - reference[:3, 3], translation, .001)
+    offset += translation
+    target[:3, 3] = reference[:3, 3] + offset / max(1., math.hypot(*offset) / TCP_POSITION_LEAD_M)
+
+    current = Rotation.from_matrix(reference[:3, :3])
+    previous = Rotation.from_matrix(target[:3, :3])
+    offset = clear_reversed_lead((previous * current.inv()).as_rotvec(), rotation, math.radians(.5))
+    offset = (Rotation.from_rotvec(rotation) * Rotation.from_rotvec(offset)).as_rotvec()
+    offset /= max(1., math.hypot(*offset) / TCP_ROTATION_LEAD_RAD)
+    target[:3, :3] = (Rotation.from_rotvec(offset) * current).as_matrix()
+
+
 def preserves_motion(primary, trial, requested, tolerance):
     """Keep the secondary step close to the primary and check signed progress."""
     import numpy as np
@@ -275,24 +310,23 @@ def follow(session, profile, chain, *, open_arm=classic_right, side="right", vel
             if not grip:
                 origin = None
             elif origin is None:
-                origin = pose
+                origin = previous_pose = pose
                 seed = np.clip(measured[:7], bounds[:7, 0], bounds[:7, 1])
-                tcp_origin = chain.forward(seed)
+                target = chain.forward(seed)
                 solver = DifferentialIK(chain, lower=bounds[:7, 0], upper=bounds[:7, 1],
                                         velocity=[velocity] * 7, posture=seed)
             else:
                 current = Rotation.from_quat(pose[3:])
-                delta = np.asarray(xr_to_robot(np.subtract(pose[:3], origin[:3])))
-                rotation = np.asarray(xr_to_robot((current * Rotation.from_quat(origin[3:]).inv()).as_rotvec()))
-                travel, turn = math.hypot(*delta), math.hypot(*rotation)
+                previous = Rotation.from_quat(previous_pose[3:])
+                delta = np.asarray(xr_to_robot(np.subtract(pose[:3], previous_pose[:3])))
+                rotation = np.asarray(xr_to_robot((current * previous.inv()).as_rotvec()))
+                previous_pose = pose
+                travel = math.dist(pose[:3], origin[:3])
+                turn = (current * Rotation.from_quat(origin[3:]).inv()).magnitude()
                 posture_weight = min(1., max(0., (travel - .002) / .028,
                                              (turn - math.radians(1)) / math.radians(14)))
-                target = tcp_origin.copy()
-                target[:3, 3] += delta / max(1., travel / .15)
-                target[:3, :3] = Rotation.from_rotvec(
-                    rotation / max(1., turn / (math.pi / 3))
-                ).as_matrix() @ tcp_origin[:3, :3]
                 seed = np.clip(reference[:7], bounds[:7, 0], bounds[:7, 1])
+                advance_tcp_target(target, chain.forward(seed), delta, rotation)
                 goal[:7] = solver.step(seed, target, period)["joints"]
             if grip:
                 if abs(joystick) > .3:
@@ -366,25 +400,30 @@ def application(profile=None, chain=None, *, token=None, camera=None, cameras=No
     runners = runner if isinstance(runner, dict) else dict.fromkeys(sides, runner)
     active_sessions = {}
     active_socket = None
+    static = files("openarm_runtime").joinpath("static")
+    page = static.joinpath("pico-classic.html").read_text(encoding="utf-8")
+    camera_script = static.joinpath("pico-windows.js").read_text(encoding="utf-8")
+    if passwordless:
+        page = page.replace("<body>", "<body data-passwordless>", 1)
+    if home_available:
+        page = page.replace('<button id="home" hidden>', '<button id="home">', 1)
+    revision = sha256((page + "\0" + camera_script).encode()).hexdigest()[:16]
+    page = page.replace("__PICO_REVISION__", revision, 1)
+    no_cache = {"Cache-Control": "no-store"}
 
     def access_response():
-        response = web.json_response({"camera": "head" in cameras, "cameras": list(cameras), "sides": sides})
+        response = web.json_response({"camera": "head" in cameras, "cameras": list(cameras),
+                                      "sides": sides, "revision": revision}, headers=no_cache)
         response.set_cookie("pico_video", token, secure=True, httponly=True, samesite="Strict")
         return response
 
-    async def index(_request):
-        page = files("openarm_runtime").joinpath("static/pico-classic.html")
-        text = page.read_text(encoding="utf-8")
-        if passwordless:
-            text = text.replace("<body>", "<body data-passwordless>", 1)
-        if home_available:
-            text = text.replace('<button id="home" hidden>', '<button id="home">', 1)
-        return web.Response(text=text, content_type="text/html", headers={"Cache-Control": "no-store"})
+    async def index(request):
+        if request.query_string:
+            raise web.HTTPFound("/", headers=no_cache)
+        return web.Response(text=page, content_type="text/html", headers=no_cache)
 
     async def windows(_request):
-        script = files("openarm_runtime").joinpath("static/pico-windows.js")
-        return web.Response(text=script.read_text(encoding="utf-8"), content_type="text/javascript",
-                            headers={"Cache-Control": "no-store"})
+        return web.Response(text=camera_script, content_type="text/javascript", headers=no_cache)
 
     async def video(request):
         name = request.match_info.get("name", "head")
@@ -447,14 +486,15 @@ def application(profile=None, chain=None, *, token=None, camera=None, cameras=No
             socket = web.WebSocketResponse(max_msg_size=1024, heartbeat=2.)
             await socket.prepare(request)
             sessions, tasks = {}, {}
+            reconnectable_arms = set()
             reason = ""
             received = False
             try:
                 first = await socket.receive(timeout=2.)
                 if first.type != web.WSMsgType.TEXT:
                     return socket
-                if first.data == "start":
-                    await socket.send_json({"error": "请刷新 Pico 页面，再开始遥操。"})
+                if first.data != CONTROL_START and first.data.split("/", 1)[0] == "start":
+                    await socket.send_json({"error": "此页面已更新，请刷新后继续。"})
                     return socket
                 if first.data not in (CONTROL_START, "home"):
                     return socket
@@ -476,29 +516,45 @@ def application(profile=None, chain=None, *, token=None, camera=None, cameras=No
                     return socket
                 sessions = active_sessions = {side: InputSession() for side in sides}
                 active_socket = socket
-                tasks = {
-                    asyncio.create_task(asyncio.to_thread(runners[side], session, profile, chains[side])): side
-                    for side, session in sessions.items()
-                }
-                running = set(tasks)
-                while running:
+                def start_arm(side, session):
+                    task = asyncio.create_task(asyncio.to_thread(runners[side], session, profile, chains[side]))
+                    tasks[task] = side
+
+                for side, session in sessions.items():
+                    start_arm(side, session)
+                while tasks:
                     timeout = INPUT_TIMEOUT if received else FIRST_INPUT_TIMEOUT
                     incoming = asyncio.create_task(socket.receive(timeout=timeout))
                     try:
-                        done, _ = await asyncio.wait(running | {incoming}, return_when=asyncio.FIRST_COMPLETED)
-                        for task in done & running:
-                            running.remove(task)
+                        done, _ = await asyncio.wait(set(tasks) | {incoming}, return_when=asyncio.FIRST_COMPLETED)
+                        for task in done.intersection(tasks):
+                            side = tasks.pop(task)
+                            session = sessions[side]
+                            # Set the timeout reason even if the worker's first
+                            # ready wait elapsed before it checked cancellation.
+                            session.cancelled()
                             try:
                                 await task
                             except InterruptedError:
-                                if not sessions[tasks[task]].cancelled():
+                                if not session.stopped:
                                     raise
-                            reason = sessions[tasks[task]].stop_reason or "Control session ended"
-                        if not running:
+                            except ConnectionError as exc:
+                                raise RuntimeError(f"{side}: {exc}") from exc
+                            reason = session.stop_reason or "Control session ended"
+                            session.stop(reason)
+                            if reason in INPUT_LOSS_REASONS:
+                                reconnectable_arms.add(side)
+                        if not tasks:
                             break
                         if incoming not in done:
                             continue
-                        message = incoming.result()
+                        try:
+                            message = incoming.result()
+                        except TimeoutError:
+                            reason = next((session.timeout_reason() for session in sessions.values()
+                                           if not session.stopped and session.ready.is_set()),
+                                          "No controller tracking")
+                            break
                     finally:
                         incoming.cancel()
                         with suppress(asyncio.CancelledError, TimeoutError):
@@ -509,6 +565,10 @@ def application(profile=None, chain=None, *, token=None, camera=None, cameras=No
                     samples = decode_samples(message.data, sides)
                     received = True
                     for side, sample in samples.items():
+                        if side in reconnectable_arms and not sample[1] and not sample[2]:
+                            sessions[side] = InputSession()
+                            reconnectable_arms.remove(side)
+                            start_arm(side, sessions[side])
                         sessions[side].submit(*sample)
                     await socket.send_json({"arms": {
                         side: session.stop_reason or "stopped" if session.stopped else
@@ -516,11 +576,7 @@ def application(profile=None, chain=None, *, token=None, camera=None, cameras=No
                         "starting" if session.ready.is_set() else "waiting"
                         for side, session in sessions.items()
                     }})
-            except TimeoutError:
-                if sessions:
-                    reason = next((session.timeout_reason() for session in sessions.values()
-                                   if session.ready.is_set()), "No controller tracking")
-            except (ConnectionError, InterruptedError):
+            except ConnectionError:
                 pass
             except Exception as exc:
                 reason = "Control error"
@@ -537,17 +593,19 @@ def application(profile=None, chain=None, *, token=None, camera=None, cameras=No
                         pass
                     except Exception:
                         LOG.exception("Classic session cleanup or tracking failed")
+                        reason = "Control error"
                 if reason:
                     LOG.info("PICO session ended: %s", reason)
                 active_sessions, active_socket = {}, None
-                await socket.close(message=reason.encode())
+                code = RECONNECT_CODE if reason in INPUT_LOSS_REASONS else 1011 if reason == "Control error" else 1000
+                await socket.close(code=code, message=reason.encode())
             return socket
 
     async def shutdown(_app):
         for session in active_sessions.values():
             session.stop()
         if active_socket is not None:
-            await active_socket.close()
+            await active_socket.close(code=1001)
 
     app = web.Application(client_max_size=4096)
     app.on_shutdown.append(shutdown)

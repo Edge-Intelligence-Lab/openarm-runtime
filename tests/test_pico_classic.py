@@ -13,7 +13,7 @@ try:
 except ImportError:
     TestClient = None
 
-from openarm_runtime.pico_classic import CONTROL_START, InputSession, application, classic_right, tracking_target
+from openarm_runtime.pico_classic import CONTROL_START, RECONNECT_CODE, InputSession, application, classic_right, tracking_target
 from openarm_simulation.pico import xr_to_robot
 
 TOKEN = "offline-test-token-at-least-24"
@@ -149,6 +149,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         second = await self.start(first_pose_delay=.35)
         closed = await second.receive(timeout=1)
         self.assertEqual(closed.type, WSMsgType.CLOSE)
+        self.assertEqual(closed.data, RECONNECT_CODE)
         self.assertEqual(closed.extra, "Controller input timed out")
         self.assertEqual(self.events, ["enabled", "disabled"] * 2)
 
@@ -227,10 +228,12 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bimanual_input_loss_leaves_peer_arm_running(self):
         outputs = {}
+        starts = {"left": 0, "right": 0}
 
         def runner(session, _profile, side):
             if not session.ready.wait(2.) or session.cancelled():
                 return
+            starts[side] += 1
             session.arm_ready.set()
             while not session.cancelled():
                 outputs[side] = session.sample()
@@ -243,9 +246,13 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
             host = client.make_url("/").raw_authority
             headers = {"Origin": f"https://{host}"}
             access = await client.post("/access", headers=headers)
-            self.assertEqual(await access.json(), {
+            info = await access.json()
+            revision = info.pop("revision")
+            self.assertEqual(info, {
                 "camera": True, "cameras": ["left", "head", "right"], "sides": ["left", "right"]})
-            self.assertIn("data-passwordless", await (await client.get("/")).text())
+            page = await (await client.get("/")).text()
+            self.assertIn("data-passwordless", page)
+            self.assertIn(f'<meta name="pico-revision" content="{revision}">', page)
             self.assertEqual((await client.get("/pico-windows.js")).status, 200)
             headers["Cookie"] = f"pico_video={access.cookies['pico_video'].value}"
             async with client.ws_connect("/input", headers=headers) as socket:
@@ -264,14 +271,52 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(status, {"left": "Controller input timed out", "right": "ready"})
                 self.assertEqual(outputs["left"][0][0], -1.)
                 self.assertEqual(outputs["right"][0][0], 1.)
+                left["grip"] = True
+                for _ in range(3):
+                    await socket.send_json({"left": left, "right": right})
+                    status = (await socket.receive_json(timeout=1))["arms"]
+                    self.assertEqual(status["left"], "Controller input timed out")
+                self.assertEqual(starts, {"left": 1, "right": 1})
+                left["grip"] = False
+                for _ in range(20):
+                    await socket.send_json({"left": left, "right": right})
+                    status = (await socket.receive_json(timeout=1))["arms"]
+                    if status["left"] == "ready":
+                        break
+                    await asyncio.sleep(.01)
+                self.assertEqual(status, {"left": "ready", "right": "ready"})
+                self.assertEqual(starts, {"left": 2, "right": 1})
                 await socket.send_str("stop")
                 self.assertEqual((await socket.receive(timeout=1)).type, WSMsgType.CLOSE)
 
     async def test_stale_page_must_reload_before_starting_motion(self):
-        page = await (await self.client.get("/")).text()
+        old = await self.client.get("/?ui=old", allow_redirects=False)
+        self.assertEqual(old.status, 302)
+        self.assertEqual(old.headers["Location"], "/")
+        response = await self.client.get("/")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        page = await response.text()
         self.assertIn(f'socket.send("{CONTROL_START}")', page)
-        async with await self.connect() as socket:
-            await socket.send_str("start")
-            self.assertIn("刷新", (await socket.receive_json(timeout=1))["error"])
-            self.assertEqual((await socket.receive(timeout=1)).type, WSMsgType.CLOSE)
+        for old_start in ("start", "start/2", "start/3"):
+            async with await self.connect() as socket:
+                await socket.send_str(old_start)
+                self.assertIn("刷新", (await socket.receive_json(timeout=1))["error"])
+                self.assertEqual((await socket.receive(timeout=1)).type, WSMsgType.CLOSE)
         self.assertEqual(self.events, [])
+
+    async def test_arm_timeout_exception_is_not_a_retryable_input_timeout(self):
+        def runner(session, _profile, _chain):
+            if session.ready.wait(1.):
+                raise TimeoutError("CAN feedback timeout")
+
+        async with TestClient(TestServer(application(object(), object(), token=TOKEN, runner=runner))) as client:
+            host = client.make_url("/").raw_authority
+            headers = {"Origin": f"https://{host}", "Cookie": f"pico_video={TOKEN}"}
+            async with client.ws_connect("/input", headers=headers) as socket:
+                await socket.send_str(CONTROL_START)
+                await socket.send_json({"right": json.loads(POSE)})
+                reply = await socket.receive_json(timeout=1)
+                if "arms" in reply:
+                    reply = await socket.receive_json(timeout=1)
+                self.assertEqual(reply["error"], "CAN feedback timeout")
+                self.assertEqual((await socket.receive(timeout=1)).data, 1011)

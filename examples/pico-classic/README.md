@@ -61,8 +61,8 @@ Open the HTTPS address in PICO Browser, enter the token if configured, look
 straight ahead and press **Start** with both grips released. Hold either
 controller's grip to follow on that arm and release it to hold position.
 While gripping, use the stick Y axis to adjust the aperture or the trigger to
-close. Exit WebXR to disable the arms. After a server update, reload the page
-before starting another session.
+close. Exit WebXR to disable the arms. Bookmark the server's root URL. When
+the server detects a newer control page it reloads in the same tab.
 
 On a dual-arm page, exit WebXR and select **双臂回零** to return both arms
 to their calibrated motor zeros. This uses the
@@ -78,12 +78,20 @@ the Classic session. A grip press anchors the current measured TCP.
 Controller translation and rotation use the same XR-to-robot basis as
 simulation: forward, right and up map to robot +X, −Y and +Z. The page fixes
 the control heading from the first valid horizontal headset direction when
-entering WebXR, or after a reference space reset. Look ahead when starting.
-Turning your head during control leaves the heading and camera behavior independent.
+entering WebXR. Look along the intended forward direction when starting.
+Walking, turning your head or reconnecting keep the same control heading.
+If WebXR recenters, the reset rotation preserves that heading when available.
+Start a new session if the headset cannot report the reset rotation.
 TCP targets use the configured `KinematicChain`, model/physical joint bounds and
 `DifferentialIK`. Each arm limits joint speed and the command lead over measured
-feedback. When a hand moves quickly, the arm follows the newest target as
-feedback catches up. Loss of one controller stops its arm independently.
+feedback. Within a grip, hand motion continues across the available workspace.
+The controller caps how far the target leads the arm reference and discards
+opposing backlog when the hand reverses. Loss of one controller stops its arm
+independently.
+While WebXR stays open, the browser retries interruption of the control
+connection automatically. Each stopped arm waits for valid tracking and
+released grip and trigger before it can start again from the measured pose.
+An operator stop, WebXR exit or hardware fault ends control.
 
 The solver first computes the hand-driven TCP step. When joint room remains,
 it uses the redundant joint direction to prefer a moderately bent elbow and
